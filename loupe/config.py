@@ -21,7 +21,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "has_completed_tour": False,
     "theme_mode": "dark",
     "auto_check_updates": True,
-    "update_manifest_url": "",
+    "update_manifest_url": "https://api.github.com/repos/voiceline-diskrep/Framed/releases/latest",
     "app_version": "1.0.0",
 }
 
