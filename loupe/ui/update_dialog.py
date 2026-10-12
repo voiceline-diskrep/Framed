@@ -132,19 +132,21 @@ class UpdateDialog(QDialog):
         button_layout.addStretch()
 
         self.btn_update = QPushButton("Update & Restart")
-        self.btn_update.setIcon(render_icon("export", 13, "#0E1013"))
+        self.btn_update.setIcon(render_icon("export", 13, "#FFFFFF"))
         self.btn_update.setFont(get_body_font(12, bold=True))
         self.btn_update.setMinimumHeight(36)
         self.btn_update.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLOR_ACCENT};
-                color: #0E1013;
-                border: 1px solid {COLOR_ACCENT};
+                background-color: #D97706;
+                color: #FFFFFF;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
                 padding: 6px 18px;
                 font-weight: 700;
             }}
             QPushButton:hover {{
-                background-color: #FFAE42;
+                background-color: #F59E0B;
+                color: #FFFFFF;
             }}
             QPushButton:disabled {{
                 background-color: #332B20;

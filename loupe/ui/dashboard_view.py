@@ -418,7 +418,7 @@ class ProjectCard(QFrame):
                     }}
                     QPushButton:hover {{
                         background-color: {COLOR_ACCENT};
-                        color: #0E1013;
+                        color: #FFFFFF;
                     }}
                 """)
                 open_folder_btn.setToolTip("Open 'edited result' folder in Windows Explorer")
@@ -479,12 +479,12 @@ class ProjectCard(QFrame):
             }}
             QPushButton:hover {{
                 background-color: #E59533;
-                color: #0E1013;
+                color: #FFFFFF;
                 border: 1px solid #FFAE42;
             }}
             QPushButton:pressed {{
                 background-color: #C87D20;
-                color: #0E1013;
+                color: #FFFFFF;
             }}
         """)
         self.resume_btn.clicked.connect(lambda: self.resume_clicked.emit(project.id))
@@ -711,8 +711,28 @@ class DashboardView(QWidget):
         # Action Buttons
         self.new_session_btn = QPushButton("New Photo Session")
         self.new_session_btn.setObjectName("accentButton")
-        self.new_session_btn.setIcon(render_icon("plus", 14, "#0E1013"))
+        self.new_session_btn.setIcon(render_icon("plus", 14, "#FFFFFF"))
         self.new_session_btn.setMinimumHeight(36)
+        self.new_session_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 13px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 6px 16px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+                color: #FFFFFF;
+                border: 1px solid #FBBF24;
+            }
+            QPushButton:pressed {
+                background-color: #B45309;
+                color: #FFFFFF;
+            }
+        """)
         self.new_session_btn.clicked.connect(self.new_session_requested.emit)
         header_layout.addWidget(self.new_session_btn)
 
@@ -957,17 +977,18 @@ class DashboardView(QWidget):
         if count == 0:
             # Empty state
             empty_box = QFrame()
+            empty_box.setObjectName("emptyBoxFrame")
             empty_box.setStyleSheet(f"""
-                QFrame {{
+                QFrame#emptyBoxFrame {{
                     background-color: {COLOR_BG_SURFACE};
                     border: 1px dashed {COLOR_BORDER_DISTINCT};
-                    border-radius: 2px;
+                    border-radius: 4px;
                     padding: 40px;
                 }}
             """)
             empty_layout = QVBoxLayout(empty_box)
             empty_layout.setAlignment(Qt.AlignCenter)
-            empty_layout.setSpacing(12)
+            empty_layout.setSpacing(14)
 
             msg_text = f"No {mode} sorting sessions in this folder yet."
             msg = QLabel(msg_text)
@@ -978,7 +999,28 @@ class DashboardView(QWidget):
             btn_label = f"Create First {mode.capitalize()} Session"
             create_btn = QPushButton(btn_label)
             create_btn.setObjectName("accentButton")
-            create_btn.setIcon(render_icon("plus", 14, "#0E1013"))
+            create_btn.setIcon(render_icon("plus", 14, "#FFFFFF"))
+            create_btn.setMinimumHeight(38)
+            create_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #D97706;
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    font-size: 13px;
+                    border: 1px solid #F59E0B;
+                    border-radius: 4px;
+                    padding: 8px 22px;
+                }
+                QPushButton:hover {
+                    background-color: #F59E0B;
+                    color: #FFFFFF;
+                    border: 1px solid #FBBF24;
+                }
+                QPushButton:pressed {
+                    background-color: #B45309;
+                    color: #FFFFFF;
+                }
+            """)
             create_btn.clicked.connect(self.new_session_requested.emit)
             empty_layout.addWidget(create_btn, alignment=Qt.AlignCenter)
 

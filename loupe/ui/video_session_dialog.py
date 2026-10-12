@@ -12,8 +12,8 @@ from loupe.storage import storage
 from loupe.core.video_engine import VIDEO_EXTENSIONS
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_DISTINCT,
-    COLOR_BORDER_SUBTLE, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_ACCENT,
-    get_display_font, get_body_font, get_mono_font
+    COLOR_BORDER_SUBTLE, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED,
+    COLOR_ACCENT, get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
 
@@ -121,7 +121,7 @@ class VideoSessionDialog(QDialog):
 
         self.btn_create = QPushButton("Start Video Session")
         self.btn_create.setObjectName("accentButton")
-        self.btn_create.setIcon(render_icon("arrow_right", 13, "#0E1013"))
+        self.btn_create.setIcon(render_icon("arrow_right", 13, "#FFFFFF"))
         self.btn_create.setMinimumHeight(36)
         self.btn_create.clicked.connect(self._create_session)
         btn_row.addWidget(self.btn_create)

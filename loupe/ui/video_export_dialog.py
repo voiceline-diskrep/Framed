@@ -12,8 +12,8 @@ from loupe.config import config
 from loupe.core.video_exporter import VideoExportWorker
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_DISTINCT,
-    COLOR_BORDER_SUBTLE, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_ACCENT,
-    COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font
+    COLOR_BORDER_SUBTLE, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED,
+    COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
 
@@ -151,7 +151,7 @@ class VideoExportDialog(QDialog):
 
         self.btn_start = QPushButton("Start Export")
         self.btn_start.setObjectName("accentButton")
-        self.btn_start.setIcon(render_icon("export", 13, "#0E1013"))
+        self.btn_start.setIcon(render_icon("export", 13, "#FFFFFF"))
         self.btn_start.setMinimumHeight(36)
         self.btn_start.clicked.connect(self._start_export)
         btn_row.addWidget(self.btn_start)

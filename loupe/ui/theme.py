@@ -188,19 +188,21 @@ def get_application_stylesheet() -> str:
 
     /* Accent Button */
     QPushButton#accentButton {{
-        background-color: {COLOR_ACCENT};
-        color: #0E1013;
+        background-color: #D97706;
+        color: #FFFFFF;
         font-weight: 700;
-        border: 1px solid {COLOR_ACCENT};
+        border: 1px solid #F59E0B;
+        border-radius: 3px;
+        padding: 7px 16px;
     }}
     QPushButton#accentButton:hover {{
-        background-color: {COLOR_ACCENT_HOVER};
-        color: #000000;
-        border-color: {COLOR_ACCENT_HOVER};
+        background-color: #F59E0B;
+        color: #FFFFFF;
+        border-color: #FBBF24;
     }}
     QPushButton#accentButton:pressed {{
-        background-color: {COLOR_ACCENT_PRESSED};
-        color: #000000;
+        background-color: #B45309;
+        color: #FFFFFF;
     }}
     QPushButton#accentButton:focus {{
         border: 2px solid #FFFFFF;
@@ -218,12 +220,12 @@ def get_application_stylesheet() -> str:
     }}
     QPushButton#resumeCullButton:hover {{
         background-color: #E59533;
-        color: #0E1013;
+        color: #FFFFFF;
         border: 1px solid #FFAE42;
     }}
     QPushButton#resumeCullButton:pressed {{
         background-color: #C87D20;
-        color: #0E1013;
+        color: #FFFFFF;
     }}
 
     /* Keep (W) Button */
