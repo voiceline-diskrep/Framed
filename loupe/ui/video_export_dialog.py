@@ -26,17 +26,19 @@ class VideoExportDialog(QDialog):
         self.exported_base_dir = ""
 
         self.setWindowTitle("Export Video Session — Framed")
-        self.setFixedSize(540, 420)
+        self.setMinimumSize(580, 500)
+        self.resize(600, 520)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(18)
 
         # Header
         h_layout = QVBoxLayout()
+        h_layout.setSpacing(4)
         tag = QLabel("EXPORT DESTINATION")
         tag.setFont(get_mono_font(10, bold=True))
         tag.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
@@ -49,9 +51,17 @@ class VideoExportDialog(QDialog):
 
         # Summary of decisions card
         card_summary = QFrame()
-        card_summary.setStyleSheet(f"background-color: {COLOR_BG_SURFACE}; border: 1px solid {COLOR_BORDER_DISTINCT}; border-radius: 2px; padding: 12px;")
+        card_summary.setObjectName("cardSummary")
+        card_summary.setStyleSheet(f"""
+            QFrame#cardSummary {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+            }}
+        """)
         cs_layout = QVBoxLayout(card_summary)
-        cs_layout.setSpacing(8)
+        cs_layout.setContentsMargins(18, 16, 18, 16)
+        cs_layout.setSpacing(10)
 
         lbl_head = QLabel("CLIPS TO COPY (ORIGINAL HIGH QUALITY):")
         lbl_head.setFont(get_mono_font(10, bold=True))
@@ -83,20 +93,49 @@ class VideoExportDialog(QDialog):
 
         # Destination input
         dir_layout = QVBoxLayout()
-        dir_layout.setSpacing(6)
+        dir_layout.setSpacing(8)
         lbl_dest = QLabel("Export Directory:")
         lbl_dest.setFont(get_body_font(12, bold=True))
         dir_layout.addWidget(lbl_dest)
 
         row_dest = QHBoxLayout()
+        row_dest.setSpacing(10)
         self.edit_dir = QLineEdit()
         self.edit_dir.setFont(get_body_font(12))
         default_dir = config.get("default_export_dir") or os.path.join(os.path.expanduser("~"), "Videos")
         self.edit_dir.setText(default_dir)
-        self.edit_dir.setStyleSheet(f"padding: 6px 10px; background-color: {COLOR_BG_SURFACE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
-        row_dest.addWidget(self.edit_dir)
+        self.edit_dir.setMinimumHeight(40)
+        self.edit_dir.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 0 12px;
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        row_dest.addWidget(self.edit_dir, stretch=1)
 
         btn_browse = QPushButton("Browse...")
+        btn_browse.setFont(get_body_font(12))
+        btn_browse.setMinimumHeight(40)
+        btn_browse.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: #2A2E35;
+            }}
+        """)
         btn_browse.clicked.connect(self._browse)
         row_dest.addWidget(btn_browse)
         dir_layout.addLayout(row_dest)
