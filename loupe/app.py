@@ -140,3 +140,25 @@ class FramedMainWindow(QMainWindow):
 
 # Alias for backward compatibility
 LoupeMainWindow = FramedMainWindow
+
+def create_app() -> QApplication:
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
+    
+    # Enforce dark palette so Windows light theme cannot force black text
+    setup_dark_palette(app)
+    # Load fonts & theme stylesheet
+    load_application_fonts()
+    app.setStyleSheet(get_application_stylesheet())
+    return app
+
+
+def main():
+    app = create_app()
+    window = FramedMainWindow()
+    window.show()
+    return app.exec()
+
+if __name__ == "__main__":
+    sys.exit(main())
