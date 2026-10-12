@@ -1,4 +1,4 @@
-"""Dashboard (main menu) view displaying working folders, projects, dates, and actions."""
+"""Dashboard (main menu) view displaying working folders, projects, dates, and dual-mode Photo/Video switching."""
 
 import os
 import shutil
@@ -245,12 +245,22 @@ class ProjectCard(QFrame):
         details_layout = QVBoxLayout()
         details_layout.setSpacing(8)
 
-        # Title Row: Project Name + Edit Session
+        # Title Row: Project Name + Mode Badge + Edit Session
         title_row = QHBoxLayout()
         title_row.setSpacing(10)
         title_lbl = QLabel(project.name)
         title_lbl.setFont(get_display_font(16, bold=True))
         title_row.addWidget(title_lbl)
+
+        # Media Type Badge
+        is_vid = getattr(project, "media_type", "photo") == "video"
+        type_badge = QLabel("VIDEO" if is_vid else "PHOTO")
+        type_badge.setFont(get_mono_font(10, bold=True))
+        if is_vid:
+            type_badge.setStyleSheet("color: #FFAE42; background-color: #2D2214; padding: 2px 6px; border: 1px solid #754B1A; border-radius: 2px;")
+        else:
+            type_badge.setStyleSheet("color: #7BE4A2; background-color: #1A3323; padding: 2px 6px; border: 1px solid #2E7D32; border-radius: 2px;")
+        title_row.addWidget(type_badge)
 
         edit_session_btn = QPushButton("Edit")
         edit_session_btn.setIcon(render_icon("edit", 11, COLOR_TEXT_SECONDARY))
@@ -309,7 +319,7 @@ class ProjectCard(QFrame):
         meta_layout.addWidget(edit_folder_btn)
 
         # Date with change button
-        date_lbl = QLabel(f"Shoot Date: {project.shoot_date}")
+        date_lbl = QLabel(f"Date: {project.shoot_date}")
         date_lbl.setFont(get_mono_font(12))
         date_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         meta_layout.addWidget(date_lbl)
@@ -346,10 +356,14 @@ class ProjectCard(QFrame):
         status_badge.setStyleSheet(f"color: {status_color}; background-color: {COLOR_BG_BASE}; padding: 3px 8px; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 2px;")
         status_layout.addWidget(status_badge)
 
-        format_info = f"{project.format_mode.replace('_', ' ').upper()}"
-        if project.sync_pairs and project.format_mode == "both":
-            format_info += " • Synced Pairs"
-        format_info += f" • {project.total_count} Frames"
+        if is_vid:
+            format_info = f"Selected: {project.selected_count} • Similar: {project.similar_count} • Unselected: {project.unselected_count} • {project.total_count} Clips"
+        else:
+            format_info = f"{project.format_mode.replace('_', ' ').upper()}"
+            if project.sync_pairs and project.format_mode == "both":
+                format_info += " • Synced Pairs"
+            format_info += f" • {project.total_count} Frames"
+
         info_lbl = QLabel(format_info)
         info_lbl.setFont(get_body_font(12))
         info_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
@@ -358,85 +372,86 @@ class ProjectCard(QFrame):
         status_layout.addStretch()
         details_layout.addLayout(status_layout)
 
-        # LRC Edited Result row
-        edited_layout = QHBoxLayout()
-        edited_layout.setSpacing(10)
+        # Photo-specific: LRC Edited Result row
+        if not is_vid:
+            edited_layout = QHBoxLayout()
+            edited_layout.setSpacing(10)
 
-        edited_count = project.edited_count
-        if edited_count > 0:
-            edited_badge = QLabel(f"✓ {edited_count} photo(s) in 'edited result'")
-            edited_badge.setFont(get_mono_font(11, bold=True))
-            edited_badge.setStyleSheet(f"color: {COLOR_ACCENT}; background-color: #261E14; padding: 3px 8px; border: 1px solid #754B1A; border-radius: 2px;")
-            edited_layout.addWidget(edited_badge)
+            edited_count = project.edited_count
+            if edited_count > 0:
+                edited_badge = QLabel(f"✓ {edited_count} photo(s) in 'edited result'")
+                edited_badge.setFont(get_mono_font(11, bold=True))
+                edited_badge.setStyleSheet(f"color: {COLOR_ACCENT}; background-color: #261E14; padding: 3px 8px; border: 1px solid #754B1A; border-radius: 2px;")
+                edited_layout.addWidget(edited_badge)
 
-            add_more_btn = QPushButton("+ Add Files")
-            add_more_btn.setIcon(render_icon("plus", 12, COLOR_TEXT_PRIMARY))
-            add_more_btn.setFont(get_body_font(11))
-            add_more_btn.setStyleSheet(f"""
-                QPushButton {{
-                    padding: 3px 10px;
-                    color: {COLOR_TEXT_PRIMARY};
-                    border: 1px solid {COLOR_BORDER_DISTINCT};
-                    background-color: {COLOR_BG_ELEVATED};
-                    border-radius: 2px;
-                }}
-                QPushButton:hover {{
-                    border-color: {COLOR_ACCENT};
-                    color: {COLOR_ACCENT};
-                }}
-            """)
-            add_more_btn.setToolTip("Add more Lightroom edited photos into 'edited result'")
-            add_more_btn.clicked.connect(self._on_add_edited_files)
-            edited_layout.addWidget(add_more_btn)
+                add_more_btn = QPushButton("+ Add Files")
+                add_more_btn.setIcon(render_icon("plus", 12, COLOR_TEXT_PRIMARY))
+                add_more_btn.setFont(get_body_font(11))
+                add_more_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        padding: 3px 10px;
+                        color: {COLOR_TEXT_PRIMARY};
+                        border: 1px solid {COLOR_BORDER_DISTINCT};
+                        background-color: {COLOR_BG_ELEVATED};
+                        border-radius: 2px;
+                    }}
+                    QPushButton:hover {{
+                        border-color: {COLOR_ACCENT};
+                        color: {COLOR_ACCENT};
+                    }}
+                """)
+                add_more_btn.setToolTip("Add more Lightroom edited photos into 'edited result'")
+                add_more_btn.clicked.connect(self._on_add_edited_files)
+                edited_layout.addWidget(add_more_btn)
 
-            open_folder_btn = QPushButton("Open Folder")
-            open_folder_btn.setIcon(render_icon("folder", 12, COLOR_ACCENT))
-            open_folder_btn.setFont(get_body_font(11))
-            open_folder_btn.setStyleSheet(f"""
-                QPushButton {{
-                    padding: 3px 10px;
-                    color: {COLOR_ACCENT};
-                    border: 1px solid {COLOR_ACCENT};
-                    background-color: #221A12;
-                    font-weight: 600;
-                    border-radius: 2px;
-                }}
-                QPushButton:hover {{
-                    background-color: {COLOR_ACCENT};
-                    color: #0E1013;
-                }}
-            """)
-            open_folder_btn.setToolTip("Open 'edited result' folder in Windows Explorer")
-            open_folder_btn.clicked.connect(self._on_open_edited_folder)
-            edited_layout.addWidget(open_folder_btn)
-        else:
-            edited_hint = QLabel("Edited Result:")
-            edited_hint.setFont(get_mono_font(11))
-            edited_hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
-            edited_layout.addWidget(edited_hint)
+                open_folder_btn = QPushButton("Open Folder")
+                open_folder_btn.setIcon(render_icon("folder", 12, COLOR_ACCENT))
+                open_folder_btn.setFont(get_body_font(11))
+                open_folder_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        padding: 3px 10px;
+                        color: {COLOR_ACCENT};
+                        border: 1px solid {COLOR_ACCENT};
+                        background-color: #221A12;
+                        font-weight: 600;
+                        border-radius: 2px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {COLOR_ACCENT};
+                        color: #0E1013;
+                    }}
+                """)
+                open_folder_btn.setToolTip("Open 'edited result' folder in Windows Explorer")
+                open_folder_btn.clicked.connect(self._on_open_edited_folder)
+                edited_layout.addWidget(open_folder_btn)
+            else:
+                edited_hint = QLabel("Edited Result:")
+                edited_hint.setFont(get_mono_font(11))
+                edited_hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+                edited_layout.addWidget(edited_hint)
 
-            add_btn = QPushButton("+ Add Files (LRC)")
-            add_btn.setIcon(render_icon("plus", 12, COLOR_ACCENT))
-            add_btn.setFont(get_body_font(11))
-            add_btn.setStyleSheet(f"""
-                QPushButton {{
-                    padding: 3px 10px;
-                    color: {COLOR_ACCENT};
-                    border: 1px solid {COLOR_BORDER_DISTINCT};
-                    background-color: {COLOR_BG_ELEVATED};
-                    border-radius: 2px;
-                }}
-                QPushButton:hover {{
-                    border-color: {COLOR_ACCENT};
-                    background-color: #2A2216;
-                }}
-            """)
-            add_btn.setToolTip("Add photos already edited in Lightroom Classic. Framed will store them in 'edited result' folder.")
-            add_btn.clicked.connect(self._on_add_edited_files)
-            edited_layout.addWidget(add_btn)
+                add_btn = QPushButton("+ Add Files (LRC)")
+                add_btn.setIcon(render_icon("plus", 12, COLOR_ACCENT))
+                add_btn.setFont(get_body_font(11))
+                add_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        padding: 3px 10px;
+                        color: {COLOR_ACCENT};
+                        border: 1px solid {COLOR_BORDER_DISTINCT};
+                        background-color: {COLOR_BG_ELEVATED};
+                        border-radius: 2px;
+                    }}
+                    QPushButton:hover {{
+                        border-color: {COLOR_ACCENT};
+                        background-color: #2A2216;
+                    }}
+                """)
+                add_btn.setToolTip("Add photos already edited in Lightroom Classic. Framed will store them in 'edited result' folder.")
+                add_btn.clicked.connect(self._on_add_edited_files)
+                edited_layout.addWidget(add_btn)
 
-        edited_layout.addStretch()
-        details_layout.addLayout(edited_layout)
+            edited_layout.addStretch()
+            details_layout.addLayout(edited_layout)
 
         main_layout.addLayout(details_layout, stretch=1)
 
@@ -445,9 +460,12 @@ class ProjectCard(QFrame):
         actions_layout.setSpacing(10)
         actions_layout.setAlignment(Qt.AlignVCenter)
 
-        # Resume Culling button (High Contrast Crisp Amber text & icon, never black on dark)
-        self.resume_btn = QPushButton("Resume Culling")
-        self.resume_btn.setIcon(render_icon("loupe", 14, "#FFAE42"))
+        # Resume button (Video vs Photo)
+        btn_text = "Resume Video Sort" if is_vid else "Resume Culling"
+        icon_name = "arrow_right" if is_vid else "loupe"
+
+        self.resume_btn = QPushButton(btn_text)
+        self.resume_btn.setIcon(render_icon(icon_name, 14, "#FFAE42"))
         self.resume_btn.setMinimumHeight(36)
         self.resume_btn.setStyleSheet(f"""
             QPushButton {{
@@ -618,15 +636,17 @@ class ProjectCard(QFrame):
 
 
 class DashboardView(QWidget):
-    """Main Dashboard with real folder management and ongoing projects."""
+    """Main Dashboard with dual Photo/Video mode switching and real folder management."""
     new_session_requested = Signal()
     open_project_requested = Signal(str)  # project_id
     export_project_requested = Signal(str) # project_id
     open_settings_requested = Signal()
+    media_mode_changed = Signal(str)      # "photo" or "video"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_folder_id: Optional[str] = None
+        self.current_media_mode: str = "photo"  # "photo" or "video"
         self._init_ui()
         self.refresh()
 
@@ -644,8 +664,8 @@ class DashboardView(QWidget):
             }}
         """)
         header_layout = QHBoxLayout(header_bar)
-        header_layout.setContentsMargins(24, 14, 24, 14)
-        header_layout.setSpacing(16)
+        header_layout.setContentsMargins(24, 12, 24, 12)
+        header_layout.setSpacing(18)
 
         # App Brand
         brand_layout = QVBoxLayout()
@@ -653,17 +673,43 @@ class DashboardView(QWidget):
         brand_title = QLabel("FRAMED")
         brand_title.setFont(get_display_font(20, bold=True))
         brand_title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; letter-spacing: 2px;")
-        brand_sub = QLabel("PHOTOGRAPHER INSPECTION & CULLING WORKSTATION")
+        brand_sub = QLabel("PHOTOGRAPHER & VIDEOGRAPHER WORKSTATION")
         brand_sub.setFont(get_mono_font(10, bold=True))
         brand_sub.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
         brand_layout.addWidget(brand_title)
         brand_layout.addWidget(brand_sub)
         header_layout.addLayout(brand_layout)
 
+        # Mode Switcher (Photo Sort | Video Sort)
+        mode_switcher_frame = QFrame()
+        mode_switcher_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_BASE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+            }}
+        """)
+        ms_layout = QHBoxLayout(mode_switcher_frame)
+        ms_layout.setContentsMargins(3, 3, 3, 3)
+        ms_layout.setSpacing(4)
+
+        self.btn_mode_photo = QPushButton("PHOTO SORT")
+        self.btn_mode_photo.setFont(get_mono_font(11, bold=True))
+        self.btn_mode_photo.clicked.connect(lambda: self._set_media_mode("photo"))
+        ms_layout.addWidget(self.btn_mode_photo)
+
+        self.btn_mode_video = QPushButton("VIDEO SORT")
+        self.btn_mode_video.setFont(get_mono_font(11, bold=True))
+        self.btn_mode_video.clicked.connect(lambda: self._set_media_mode("video"))
+        ms_layout.addWidget(self.btn_mode_video)
+
+        header_layout.addWidget(mode_switcher_frame)
+        self._update_mode_switcher_styles()
+
         header_layout.addStretch()
 
         # Action Buttons
-        self.new_session_btn = QPushButton("New Culling Session")
+        self.new_session_btn = QPushButton("New Photo Session")
         self.new_session_btn.setObjectName("accentButton")
         self.new_session_btn.setIcon(render_icon("plus", 14, "#0E1013"))
         self.new_session_btn.setMinimumHeight(36)
@@ -705,7 +751,7 @@ class DashboardView(QWidget):
 
         add_folder_btn = QPushButton()
         add_folder_btn.setIcon(render_icon("plus", 12, COLOR_TEXT_PRIMARY))
-        add_folder_btn.setToolTip("Create New Folder (e.g. School, Personal)")
+        add_folder_btn.setToolTip("Create New Folder (e.g. School, Weddings, Personal)")
         add_folder_btn.setFixedSize(24, 24)
         add_folder_btn.clicked.connect(self._create_new_folder)
         sidebar_title_layout.addWidget(add_folder_btn)
@@ -815,6 +861,45 @@ class DashboardView(QWidget):
         content_layout.addWidget(right_area, stretch=1)
         root_layout.addLayout(content_layout, stretch=1)
 
+    def _set_media_mode(self, mode: str):
+        if self.current_media_mode != mode:
+            self.current_media_mode = mode
+            self._update_mode_switcher_styles()
+            self.new_session_btn.setText("New Photo Session" if mode == "photo" else "New Video Session")
+            self.media_mode_changed.emit(mode)
+            self._load_projects_for_selection()
+
+    def _update_mode_switcher_styles(self):
+        active_style = f"""
+            QPushButton {{
+                background-color: #2D2214;
+                color: #FFAE42;
+                border: 1px solid #E59533;
+                border-radius: 3px;
+                padding: 6px 14px;
+                font-weight: 700;
+            }}
+        """
+        inactive_style = f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLOR_TEXT_MUTED};
+                border: 1px solid transparent;
+                border-radius: 3px;
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """
+        if self.current_media_mode == "photo":
+            self.btn_mode_photo.setStyleSheet(active_style)
+            self.btn_mode_video.setStyleSheet(inactive_style)
+        else:
+            self.btn_mode_photo.setStyleSheet(inactive_style)
+            self.btn_mode_video.setStyleSheet(active_style)
+
     def refresh(self):
         """Reload folders and projects from storage."""
         self.folder_list.clear()
@@ -849,6 +934,7 @@ class DashboardView(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
+        mode = self.current_media_mode
         if self.selected_folder_id:
             folder = storage.get_folder_by_id(self.selected_folder_id)
             f_name = folder.name if folder else "Folder"
@@ -856,16 +942,17 @@ class DashboardView(QWidget):
             self.header_edit_folder_btn.setVisible(True)
             self.rename_folder_btn.setEnabled(True)
             self.delete_folder_btn.setEnabled(True)
-            projects = storage.get_projects(self.selected_folder_id)
+            projects = storage.get_projects(self.selected_folder_id, media_type=mode)
         else:
             self.folder_title_lbl.setText("All Projects")
             self.header_edit_folder_btn.setVisible(False)
             self.rename_folder_btn.setEnabled(False)
             self.delete_folder_btn.setEnabled(False)
-            projects = storage.get_projects()
+            projects = storage.get_projects(media_type=mode)
 
         count = len(projects)
-        self.project_count_lbl.setText(f"{count} {'session' if count == 1 else 'sessions'}")
+        term = "video session" if mode == "video" else "photo session"
+        self.project_count_lbl.setText(f"{count} {term}{'' if count == 1 else 's'}")
 
         if count == 0:
             # Empty state
@@ -882,12 +969,14 @@ class DashboardView(QWidget):
             empty_layout.setAlignment(Qt.AlignCenter)
             empty_layout.setSpacing(12)
 
-            msg = QLabel("No photography sessions in this folder yet.")
+            msg_text = f"No {mode} sorting sessions in this folder yet."
+            msg = QLabel(msg_text)
             msg.setFont(get_body_font(14))
             msg.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
             empty_layout.addWidget(msg, alignment=Qt.AlignCenter)
 
-            create_btn = QPushButton("Create First Session")
+            btn_label = f"Create First {mode.capitalize()} Session"
+            create_btn = QPushButton(btn_label)
             create_btn.setObjectName("accentButton")
             create_btn.setIcon(render_icon("plus", 14, "#0E1013"))
             create_btn.clicked.connect(self.new_session_requested.emit)
@@ -905,7 +994,7 @@ class DashboardView(QWidget):
                 self.projects_layout.addWidget(card)
 
     def _create_new_folder(self):
-        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name (e.g. School, Weddings, Personal):")
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name (e.g. School, Weddings, Commercial):")
         if ok and name.strip():
             new_f = storage.create_folder(name.strip())
             self.selected_folder_id = new_f.id
@@ -946,7 +1035,7 @@ class DashboardView(QWidget):
             return
         confirm = QMessageBox.question(
             self, "Delete Session",
-            f"Delete session '{proj.name}'?\nOriginal photos on disk will never be touched.",
+            f"Delete session '{proj.name}'?\nOriginal media on disk will never be touched.",
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:

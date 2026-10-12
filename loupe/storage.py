@@ -84,10 +84,12 @@ class StorageManager:
         return False
 
     # Project operations
-    def get_projects(self, folder_id: Optional[str] = None) -> List[Project]:
+    def get_projects(self, folder_id: Optional[str] = None, media_type: Optional[str] = None) -> List[Project]:
         projs = list(self.projects.values())
         if folder_id:
             projs = [p for p in projs if p.folder_id == folder_id]
+        if media_type:
+            projs = [p for p in projs if getattr(p, "media_type", "photo") == media_type]
         return sorted(projs, key=lambda p: p.last_opened_at, reverse=True)
 
     def get_project_by_id(self, project_id: str) -> Optional[Project]:

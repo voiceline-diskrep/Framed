@@ -322,5 +322,89 @@ class TestLoupeWorkstation(unittest.TestCase):
         self.assertIn("updater", info.release_notes)
         self.assertTrue(is_newer_version(info.version, "1.0.0"))
 
+    def test_video_pipeline_and_export(self):
+        """Verify video metadata, proxy compression, non-destructive Selected/Similar/Unselected export, and dual mode switching."""
+        import cv2
+        import numpy as np
+        from loupe.core.video_engine import get_video_metadata, compress_video_to_proxy
+        from loupe.core.video_exporter import VideoExportWorker
+
+        # 1. Create a dummy 1920x1080 video clip
+        test_video = os.path.join(self.temp_dir, "CLIP_001.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(test_video, fourcc, 24.0, (1920, 1080))
+        for _ in range(24):
+            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            cv2.putText(frame, "TEST CLIP", (100, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+            writer.write(frame)
+        writer.release()
+
+        self.assertTrue(os.path.exists(test_video))
+
+        # 2. Test metadata extraction
+        meta = get_video_metadata(test_video)
+        self.assertEqual(meta["width"], 1920)
+        self.assertEqual(meta["height"], 1080)
+        self.assertEqual(meta["fps"], 24.0)
+        self.assertGreater(meta["duration_seconds"], 0.8)
+
+        # 3. Test proxy compression
+        proxy_path = os.path.join(self.temp_dir, "CLIP_001_proxy.mp4")
+        compress_video_to_proxy(test_video, proxy_path, target_max_width=960)
+        self.assertTrue(os.path.exists(proxy_path))
+        p_meta = get_video_metadata(proxy_path)
+        self.assertEqual(p_meta["width"], 960)
+        self.assertEqual(p_meta["height"], 540)
+
+        # 4. Test non-destructive VideoExportWorker with Selected, Similar, and Unselected
+        clip2 = os.path.join(self.temp_dir, "CLIP_002.mp4")
+        clip3 = os.path.join(self.temp_dir, "CLIP_003.mp4")
+        shutil.copy2(test_video, clip2)
+        shutil.copy2(test_video, clip3)
+
+        items = [
+            PhotoItem(base_name="CLIP_001", primary_path=test_video, is_video=True, status="selected"),
+            PhotoItem(base_name="CLIP_002", primary_path=clip2, is_video=True, status="similar"),
+            PhotoItem(base_name="CLIP_003", primary_path=clip3, is_video=True, status="unselected"),
+        ]
+
+        proj = Project(name="Commercial Shoot Reel", media_type="video", items=items)
+        export_root = os.path.join(self.temp_dir, "video_exports")
+
+        worker = VideoExportWorker(proj, export_root)
+        results = []
+        worker.export_finished.connect(lambda res: results.append(res))
+        worker.run()
+
+        self.assertEqual(len(results), 1)
+        res = results[0]
+        base_dir = res["base_dir"]
+
+        sel_dir = os.path.join(base_dir, "Selected")
+        sim_dir = os.path.join(base_dir, "Similar")
+        unsel_dir = os.path.join(base_dir, "Unselected")
+
+        self.assertTrue(os.path.exists(sel_dir))
+        self.assertTrue(os.path.exists(sim_dir))
+        self.assertTrue(os.path.exists(unsel_dir))
+
+        self.assertEqual(len(os.listdir(sel_dir)), 1)
+        self.assertEqual(len(os.listdir(sim_dir)), 1)
+        self.assertEqual(len(os.listdir(unsel_dir)), 1)
+
+        # Verify original source files were untouched
+        self.assertTrue(os.path.exists(test_video))
+        self.assertTrue(os.path.exists(clip2))
+        self.assertTrue(os.path.exists(clip3))
+
+        # 5. Test dashboard dual mode switching
+        dash = DashboardView()
+        dash._set_media_mode("video")
+        self.assertEqual(dash.current_media_mode, "video")
+        self.assertIn("Video", dash.new_session_btn.text())
+        dash._set_media_mode("photo")
+        self.assertEqual(dash.current_media_mode, "photo")
+        self.assertIn("Photo", dash.new_session_btn.text())
+
 if __name__ == "__main__":
     unittest.main()

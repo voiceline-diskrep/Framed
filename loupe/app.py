@@ -1,9 +1,9 @@
-"""Main application coordinator integrating Dashboard, Review Screen, Tour, and Settings."""
+"""Main application coordinator integrating Dashboard, Photo Review, Video Review, Tour, and Settings."""
 
 import sys
 import os
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QStackedWidget, QWidget, QMessageBox
+    QApplication, QMainWindow, QStackedWidget, QWidget, QMessageBox, QDialog
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
@@ -14,15 +14,18 @@ from loupe.ui.theme import load_application_fonts, get_application_stylesheet, s
 from loupe.ui.icons import render_icon
 from loupe.ui.dashboard_view import DashboardView
 from loupe.ui.review_view import ReviewView
+from loupe.ui.video_review_view import VideoReviewView
 from loupe.ui.session_setup_dialog import SessionSetupDialog
+from loupe.ui.video_session_dialog import VideoSessionDialog
 from loupe.ui.settings_dialog import SettingsDialog
 from loupe.ui.export_dialog import ExportDialog
+from loupe.ui.video_export_dialog import VideoExportDialog
 from loupe.ui.tour_overlay import TourDialog
 
 class FramedMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Framed — Photographer's Inspection & Culling Workstation")
+        self.setWindowTitle("Framed — Photographer & Videographer Workstation")
         self.resize(1280, 840)
         self.setMinimumSize(960, 640)
 
@@ -37,17 +40,17 @@ class FramedMainWindow(QMainWindow):
         # Views
         self.dashboard_view = DashboardView(self)
         self.review_view = ReviewView(self)
+        self.video_review_view = VideoReviewView(self)
 
-        self.stack.addWidget(self.dashboard_view)  # Index 0
-        self.stack.addWidget(self.review_view)     # Index 1
+        self.stack.addWidget(self.dashboard_view)        # Index 0: Dashboard
+        self.stack.addWidget(self.review_view)           # Index 1: Photo Culling View
+        self.stack.addWidget(self.video_review_view)     # Index 2: Video Sorting View
 
         self._connect_signals()
 
         # Check first launch tour
         if not config.get("has_completed_tour", False):
-            # Show tour after event loop starts
             self.dashboard_view.layout().activate()
-            # Trigger skippable guided tour
             tour = TourDialog(self)
             tour.show()
 
@@ -76,13 +79,22 @@ class FramedMainWindow(QMainWindow):
         self.dashboard_view.export_project_requested.connect(self._export_project)
         self.dashboard_view.open_settings_requested.connect(self._open_settings)
 
-        # Review screen signals
+        # Photo Review screen signals
         self.review_view.back_to_dashboard.connect(self._show_dashboard)
         self.review_view.export_requested.connect(self._export_project)
 
+        # Video Review screen signals
+        self.video_review_view.back_to_dashboard.connect(self._show_dashboard)
+        self.video_review_view.export_requested.connect(self._export_project)
+
     def _open_new_session_dialog(self):
-        dlg = SessionSetupDialog(self)
-        if dlg.exec() == SessionSetupDialog.Accepted and dlg.created_project:
+        # Determine mode from dashboard
+        if self.dashboard_view.current_media_mode == "video":
+            dlg = VideoSessionDialog(self)
+        else:
+            dlg = SessionSetupDialog(self)
+
+        if dlg.exec() == QDialog.Accepted and dlg.created_project:
             self._open_project(dlg.created_project.id)
 
     def _open_project(self, project_id: str):
@@ -91,9 +103,14 @@ class FramedMainWindow(QMainWindow):
             QMessageBox.warning(self, "Session Not Found", "The requested session could not be found.")
             return
 
-        self.review_view.load_project(proj)
-        self.stack.setCurrentIndex(1)
-        self.review_view.setFocus()
+        if getattr(proj, "media_type", "photo") == "video":
+            self.video_review_view.load_project(proj)
+            self.stack.setCurrentIndex(2)
+            self.video_review_view.setFocus()
+        else:
+            self.review_view.load_project(proj)
+            self.stack.setCurrentIndex(1)
+            self.review_view.setFocus()
 
     def _show_dashboard(self):
         self.dashboard_view.refresh()
@@ -103,8 +120,13 @@ class FramedMainWindow(QMainWindow):
         proj = storage.get_project_by_id(project_id)
         if not proj:
             return
-        dlg = ExportDialog(proj, self)
-        dlg.exec()
+
+        if getattr(proj, "media_type", "photo") == "video":
+            dlg = VideoExportDialog(proj, self)
+            dlg.exec()
+        else:
+            dlg = ExportDialog(proj, self)
+            dlg.exec()
 
     def _open_settings(self):
         dlg = SettingsDialog(self)
@@ -118,25 +140,3 @@ class FramedMainWindow(QMainWindow):
 
 # Alias for backward compatibility
 LoupeMainWindow = FramedMainWindow
-
-def create_app() -> QApplication:
-    app = QApplication.instance()
-    if not app:
-        app = QApplication(sys.argv)
-    
-    # Enforce dark palette so Windows light theme cannot force black text
-    setup_dark_palette(app)
-    # Load fonts & theme stylesheet
-    load_application_fonts()
-    app.setStyleSheet(get_application_stylesheet())
-    return app
-
-
-def main():
-    app = create_app()
-    window = FramedMainWindow()
-    window.show()
-    return app.exec()
-
-if __name__ == "__main__":
-    sys.exit(main())
