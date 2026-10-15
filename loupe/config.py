@@ -11,6 +11,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "key_bindings": {
         "keep": "W",
         "reject": "S",
+        "maybe": "E",
         "prev": "A",
         "next": "D",
     },
@@ -22,7 +23,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "theme_mode": "dark",
     "auto_check_updates": True,
     "update_manifest_url": "https://api.github.com/repos/voiceline-diskrep/Framed/releases/latest",
-    "app_version": "1.1.3",
+    "app_version": "1.1.4",
 }
 
 def get_app_dir() -> str:
@@ -101,8 +102,9 @@ class ConfigManager:
         self._config[key] = value
         self.save()
 
-    def get_key_binding(self, action: str) -> str:
-        return self._config.get("key_bindings", {}).get(action, DEFAULT_CONFIG["key_bindings"].get(action, "W"))
+    def get_key_binding(self, action: str, default: Any = None) -> str:
+        fallback = default if default is not None else DEFAULT_CONFIG["key_bindings"].get(action, "W")
+        return self._config.get("key_bindings", {}).get(action, fallback)
 
     def set_key_binding(self, action: str, key: str) -> None:
         if "key_bindings" not in self._config:

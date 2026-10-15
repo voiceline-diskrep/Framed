@@ -4,7 +4,7 @@ import os
 from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QSlider, QStackedWidget, QMessageBox, QCheckBox, QMenu
+    QFrame, QSlider, QStackedWidget, QMessageBox, QCheckBox, QMenu, QDialog
 )
 from PySide6.QtCore import Qt, Signal, QUrl, QTime
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -12,6 +12,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from loupe.models import Project, PhotoItem
 from loupe.storage import storage
 from loupe.core.video_engine import get_video_metadata, VideoProxyQueue
+from loupe.ui.finish_session_dialog import FinishSessionDialog
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BG_HOVER,
     COLOR_BORDER_SUBTLE, COLOR_BORDER_DISTINCT, COLOR_TEXT_PRIMARY,
@@ -70,6 +71,14 @@ class VideoReviewView(QWidget):
         self.btn_back.setStyleSheet(f"border: 1px solid {COLOR_BORDER_SUBTLE}; padding: 6px 12px;")
         self.btn_back.clicked.connect(self._confirm_exit_to_dashboard)
         h_layout.addWidget(self.btn_back)
+
+        # Finish Session (Green) Button
+        self.btn_finish = QPushButton(" Finish Session")
+        self.btn_finish.setObjectName("finishButton")
+        self.btn_finish.setIcon(render_icon("check", 14, "#FFFFFF"))
+        self.btn_finish.clicked.connect(self._handle_finish_session)
+        self.btn_finish.setVisible(False)
+        h_layout.addWidget(self.btn_finish)
 
         # Mode Badge
         mode_badge = QLabel("VIDEO SORT")
@@ -423,6 +432,23 @@ class VideoReviewView(QWidget):
         else:
             self.lbl_decision_badge.setText("PENDING REVIEW")
             self.lbl_decision_badge.setStyleSheet(f"background-color: {COLOR_BG_ELEVATED}; color: {COLOR_TEXT_MUTED}; border: 1px solid {COLOR_BORDER_SUBTLE};")
+
+        all_done = bool(self.project and len(self.project.items) > 0 and self.project.pending_count == 0)
+        self.btn_finish.setVisible(all_done)
+
+    def _handle_finish_session(self):
+        if not self.project:
+            return
+        dlg = FinishSessionDialog(self.project, self)
+        if dlg.exec() == QDialog.Accepted:
+            if dlg.choice == FinishSessionDialog.FINISH_NOW:
+                self.player.stop()
+                storage.save_project(self.project)
+                self.back_to_dashboard.emit()
+            elif dlg.choice == FinishSessionDialog.FINISH_AND_EXPORT:
+                self.player.stop()
+                storage.save_project(self.project)
+                self.export_requested.emit(self.project.id)
 
     def _on_no_compression_toggled(self, checked: bool):
         self.view_uncompressed = checked

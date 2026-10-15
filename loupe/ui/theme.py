@@ -25,6 +25,7 @@ COLOR_ACCENT_PRESSED = "#CF8024"
 
 COLOR_STATUS_KEPT = "#3EA66A"       # Forest Sage
 COLOR_STATUS_REJECTED = "#D44747"   # Cinnabar Red
+COLOR_STATUS_MAYBE = "#D97706"      # Warm Amber / Question
 COLOR_STATUS_PENDING = "#727B88"
 
 # Fonts loaded dynamically
@@ -264,6 +265,47 @@ def get_application_stylesheet() -> str:
     }}
     QPushButton#rejectButton:focus {{
         border: 2px solid #F87171;
+    }}
+
+    /* Maybe (E) Button */
+    QPushButton#maybeButton {{
+        background-color: #2D2314;
+        color: #FBBF24;
+        border: 1px solid #D97706;
+        font-weight: 600;
+        padding: 9px 18px;
+    }}
+    QPushButton#maybeButton:hover {{
+        background-color: #42321B;
+        color: #FDE68A;
+    }}
+    QPushButton#maybeButton:pressed {{
+        background-color: #241C10;
+    }}
+    QPushButton#maybeButton:focus {{
+        border: 2px solid #FBBF24;
+    }}
+
+    /* Finish Session (Green) Button */
+    QPushButton#finishButton {{
+        background-color: #065F46;
+        color: #FFFFFF;
+        border: 1px solid #10B981;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 6px 16px;
+        border-radius: 3px;
+    }}
+    QPushButton#finishButton:hover {{
+        background-color: #047857;
+        color: #FFFFFF;
+        border-color: #34D399;
+    }}
+    QPushButton#finishButton:pressed {{
+        background-color: #064E3B;
+    }}
+    QPushButton#finishButton:focus {{
+        border: 2px solid #34D399;
     }}
 
     /* Line Edits & Inputs */

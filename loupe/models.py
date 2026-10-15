@@ -16,7 +16,7 @@ class PhotoItem:
     primary_path: str = ""
     raw_size: int = 0
     jpeg_size: int = 0
-    status: str = "pending"  # "pending", "kept"/"selected", "similar", "rejected"/"unselected"
+    status: str = "pending"  # "pending", "kept"/"selected", "maybe"/"similar", "rejected"/"unselected"
     metadata: Dict[str, Any] = field(default_factory=dict)
     proxy_path: Optional[str] = None
     duration_seconds: float = 0.0
@@ -94,7 +94,11 @@ class Project:
 
     @property
     def similar_count(self) -> int:
-        return sum(1 for item in self.items if item.status == "similar")
+        return sum(1 for item in self.items if item.status in ("similar", "maybe"))
+
+    @property
+    def maybe_count(self) -> int:
+        return sum(1 for item in self.items if item.status in ("maybe", "similar"))
 
     @property
     def unselected_count(self) -> int:

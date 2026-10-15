@@ -192,10 +192,31 @@ class TestLoupeWorkstation(unittest.TestCase):
         self.assertEqual(proj.items[1].status, "rejected")
         self.assertEqual(proj.current_index, 2)
 
-        # Undo last action (Ctrl+Z) -> restores photo 1 status to pending and navigates back
+        # Maybe current (E action) -> marks maybe and advances to 3
+        review.maybe_current()
+        self.assertEqual(proj.items[2].status, "maybe")
+        self.assertEqual(proj.current_index, 3)
+
+        # Keep current on photo 3 -> all 4 photos reviewed!
+        review.keep_current()
+        self.assertEqual(proj.items[3].status, "kept")
+        self.assertEqual(proj.pending_count, 0)
+        self.assertEqual(proj.maybe_count, 1)
+        self.assertFalse(review.finish_btn.isHidden())
+
+        # Test FinishSessionDialog choices
+        from loupe.ui.finish_session_dialog import FinishSessionDialog
+        fs_dlg = FinishSessionDialog(proj)
+        self.assertIsNotNone(fs_dlg)
+        fs_dlg._choose_finish_now()
+        self.assertEqual(fs_dlg.choice, FinishSessionDialog.FINISH_NOW)
+        fs_dlg._choose_export()
+        self.assertEqual(fs_dlg.choice, FinishSessionDialog.FINISH_AND_EXPORT)
+
+        # Undo last action (Ctrl+Z) -> restores photo 3 status and navigates back
         review.undo_last_decision()
-        self.assertEqual(proj.items[1].status, "pending")
-        self.assertEqual(proj.current_index, 1)
+        self.assertEqual(proj.items[3].status, "pending")
+        self.assertEqual(proj.current_index, 3)
 
         # Test recovery from Not Accepted tray
         proj.items[1].status = "rejected"

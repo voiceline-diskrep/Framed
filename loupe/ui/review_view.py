@@ -4,7 +4,7 @@ import os
 from typing import Optional, List, Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QMessageBox, QGraphicsView, QGraphicsScene,
+    QFrame, QMessageBox, QDialog, QGraphicsView, QGraphicsScene,
     QGraphicsPixmapItem, QGraphicsRectItem, QProgressBar
 )
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF
@@ -19,11 +19,12 @@ from loupe.core.metadata import MetadataExtractor
 from loupe.ui.stats_panel import StatsPanel
 from loupe.ui.not_accepted_dialog import NotAcceptedDialog
 from loupe.ui.preload_overlay import PreloadOverlay
+from loupe.ui.finish_session_dialog import FinishSessionDialog
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY,
     COLOR_TEXT_MUTED, COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED,
-    get_display_font, get_body_font, get_mono_font
+    COLOR_STATUS_MAYBE, get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
 
@@ -128,6 +129,14 @@ class ReviewView(QWidget):
         self.back_btn.setIcon(render_icon("arrow_left", 14, COLOR_TEXT_PRIMARY))
         self.back_btn.clicked.connect(self._handle_escape_request)
         top_layout.addWidget(self.back_btn)
+
+        # Green Finish Session button (Top Left)
+        self.finish_btn = QPushButton("Finish Session")
+        self.finish_btn.setObjectName("finishButton")
+        self.finish_btn.setIcon(render_icon("check", 14, "#FFFFFF"))
+        self.finish_btn.clicked.connect(self._handle_finish_session)
+        self.finish_btn.setVisible(False)
+        top_layout.addWidget(self.finish_btn)
 
         # Project Info
         proj_info_layout = QVBoxLayout()
@@ -234,6 +243,14 @@ class ReviewView(QWidget):
         self.reject_btn.clicked.connect(self.reject_current)
         controls_row.addWidget(self.reject_btn)
 
+        # MAYBE BUTTON
+        self.maybe_btn = QPushButton("Maybe (E)")
+        self.maybe_btn.setObjectName("maybeButton")
+        self.maybe_btn.setIcon(render_icon("maybe", 14, "#FBBF24"))
+        self.maybe_btn.setMinimumHeight(40)
+        self.maybe_btn.clicked.connect(self.maybe_current)
+        controls_row.addWidget(self.maybe_btn)
+
         # KEEP BUTTON
         self.keep_btn = QPushButton("Keep Photo (W)")
         self.keep_btn.setObjectName("keepButton")
@@ -317,7 +334,8 @@ class ReviewView(QWidget):
         if not self.project or not self.project.items:
             self.counter_lbl.setText("0 of 0")
             self.current_filename_lbl.setText("No photos in session")
-            self.tally_lbl.setText("Kept: 0  |  Not Accepted: 0  |  Remaining: 0")
+            self.tally_lbl.setText("Kept: 0  |  Maybe: 0  |  Not Accepted: 0  |  Remaining: 0")
+            self.finish_btn.setVisible(False)
             return
 
         idx = self.project.current_index
@@ -329,9 +347,13 @@ class ReviewView(QWidget):
         self.current_filename_lbl.setText(f"{item.base_name} • {fmt_str}")
 
         self.tally_lbl.setText(
-            f"Kept: {self.project.kept_count}  |  Not Accepted: {self.project.rejected_count}  |  Remaining: {self.project.pending_count}"
+            f"Kept: {self.project.kept_count}  |  Maybe: {self.project.maybe_count}  |  Not Accepted: {self.project.rejected_count}  |  Remaining: {self.project.pending_count}"
         )
         self.stats_panel.update_rejected_count(self.project.rejected_count)
+
+        # Check if all pictures are done: show the green Finish Session button on top left!
+        all_done = bool(self.project and len(self.project.items) > 0 and self.project.pending_count == 0)
+        self.finish_btn.setVisible(all_done)
 
         # Update Badge
         if item.status == "kept":
@@ -350,6 +372,16 @@ class ReviewView(QWidget):
                 background-color: #2F1717;
                 color: #F87171;
                 border: 1px solid {COLOR_STATUS_REJECTED};
+                padding: 5px 12px;
+                border-radius: 2px;
+                font-weight: 600;
+            """)
+        elif item.status in ("maybe", "similar"):
+            self.badge_lbl.setText("MAYBE")
+            self.badge_lbl.setStyleSheet(f"""
+                background-color: #2D2314;
+                color: #FBBF24;
+                border: 1px solid {COLOR_STATUS_MAYBE};
                 padding: 5px 12px;
                 border-radius: 2px;
                 font-weight: 600;
@@ -416,6 +448,16 @@ class ReviewView(QWidget):
         self._display_current_photo()
         self.go_next()
 
+    def maybe_current(self):
+        if not self.project or not self.project.items:
+            return
+        idx = self.project.current_index
+        item = self.project.items[idx]
+        self.undo_stack.append((idx, item.status))
+        item.status = "maybe"
+        self._display_current_photo()
+        self.go_next()
+
     def reject_current(self):
         if not self.project or not self.project.items:
             return
@@ -425,6 +467,19 @@ class ReviewView(QWidget):
         item.status = "rejected"
         self._display_current_photo()
         self.go_next()
+
+    def _handle_finish_session(self):
+        if not self.project:
+            return
+        dlg = FinishSessionDialog(self.project, self)
+        if dlg.exec() == QDialog.Accepted:
+            if dlg.choice == FinishSessionDialog.FINISH_NOW:
+                storage.save_project(self.project)
+                self.preload_manager.cleanup()
+                self.back_to_dashboard.emit()
+            elif dlg.choice == FinishSessionDialog.FINISH_AND_EXPORT:
+                storage.save_project(self.project)
+                self.export_requested.emit(self.project.id)
 
     def undo_last_decision(self):
         if not self.undo_stack or not self.project:
@@ -491,6 +546,7 @@ class ReviewView(QWidget):
         # Remappable keys from config
         keep_key = config.get_key_binding("keep").upper()
         reject_key = config.get_key_binding("reject").upper()
+        maybe_key = config.get_key_binding("maybe", "E").upper()
         prev_key = config.get_key_binding("prev").upper()
         next_key = config.get_key_binding("next").upper()
 
@@ -505,6 +561,9 @@ class ReviewView(QWidget):
             event.accept()
         elif key_str == reject_key:
             self.reject_current()
+            event.accept()
+        elif key_str == maybe_key or key_str in ("E", "M") or key == Qt.Key_E:
+            self.maybe_current()
             event.accept()
         elif key_str == prev_key or key == Qt.Key_Left:
             self.go_previous()

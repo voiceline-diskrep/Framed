@@ -146,6 +146,7 @@ class SettingsDialog(QDialog):
         grid_keys.setSpacing(8)
 
         self.key_keep = self._create_key_row("Keep Photo:", "W", grid_keys)
+        self.key_maybe = self._create_key_row("Maybe / Review Later:", "E", grid_keys)
         self.key_reject = self._create_key_row("Move to Not Accepted:", "S", grid_keys)
         self.key_prev = self._create_key_row("Previous Photo:", "A", grid_keys)
         self.key_next = self._create_key_row("Next Photo:", "D", grid_keys)
@@ -336,6 +337,7 @@ class SettingsDialog(QDialog):
         self.ram_val_lbl.setText(f"{ram_gb} GB")
 
         self.key_keep.setText(config.get_key_binding("keep"))
+        self.key_maybe.setText(config.get_key_binding("maybe", "E"))
         self.key_reject.setText(config.get_key_binding("reject"))
         self.key_prev.setText(config.get_key_binding("prev"))
         self.key_next.setText(config.get_key_binding("next"))
@@ -359,6 +361,7 @@ class SettingsDialog(QDialog):
     def _save_values(self):
         config.set("ram_budget_gb", self.ram_slider.value())
         config.set_key_binding("keep", self.key_keep.text().strip() or "W")
+        config.set_key_binding("maybe", self.key_maybe.text().strip() or "E")
         config.set_key_binding("reject", self.key_reject.text().strip() or "S")
         config.set_key_binding("prev", self.key_prev.text().strip() or "A")
         config.set_key_binding("next", self.key_next.text().strip() or "D")

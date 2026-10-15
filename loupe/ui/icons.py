@@ -129,13 +129,22 @@ def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
         painter.drawLine(QPointF(s / 2, pad), QPointF(s * 0.65, pad * 1.5))
         painter.drawLine(QPointF(s * 0.65, pad * 1.5), QPointF(s * 0.65, pad * 0.5))
 
-    elif name == "trash":
-        painter.drawLine(QPointF(pad, pad * 1.5), QPointF(s - pad, pad * 1.5))
-        painter.drawLine(QPointF(s * 0.4, pad * 1.5), QPointF(s * 0.4, pad))
-        painter.drawLine(QPointF(s * 0.4, pad), QPointF(s * 0.6, pad))
-        painter.drawLine(QPointF(s * 0.6, pad), QPointF(s * 0.6, pad * 1.5))
-        rect = QRectF(pad + 1.5, pad * 1.5, s - (pad + 1.5) * 2, s - pad * 2.5)
-        painter.drawRect(rect)
+    elif name in ("maybe", "question"):
+        # Distinct question mark
+        path = QPainterPath()
+        path.moveTo(pad, pad + s * 0.15)
+        path.arcTo(QRectF(pad, pad, s - pad * 2, (s - pad * 2) * 0.55), 180, -180)
+        path.lineTo(s / 2, s * 0.6)
+        painter.drawPath(path)
+        painter.drawEllipse(QPointF(s / 2, s - pad * 0.9), 1.2, 1.2)
+
+    elif name == "flag":
+        painter.drawLine(QPointF(pad, pad), QPointF(pad, s - pad))
+        path = QPainterPath()
+        path.moveTo(pad, pad)
+        path.lineTo(s - pad, pad + s * 0.2)
+        path.lineTo(pad, pad + s * 0.4)
+        painter.drawPath(path)
 
     else:
         # Default dot

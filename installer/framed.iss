@@ -2,7 +2,7 @@
 
 #define MyAppName "Framed"
 #define MyAppFullName "Framed Photo Inspection & Culling Workstation"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.4"
 #define MyAppPublisher "Framed Optical"
 #define MyAppExeName "Framed.exe"
 

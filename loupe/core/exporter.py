@@ -34,15 +34,23 @@ class ExportWorker(QThread):
             
             selected_raw = os.path.join(base_dir, "Selected", "RAW")
             selected_jpeg = os.path.join(base_dir, "Selected", "JPEG")
+            maybe_raw = os.path.join(base_dir, "Maybe", "RAW")
+            maybe_jpeg = os.path.join(base_dir, "Maybe", "JPEG")
             unselected_raw = os.path.join(base_dir, "Unselected", "RAW")
             unselected_jpeg = os.path.join(base_dir, "Unselected", "JPEG")
 
             # Collect all operations: list of (src_path, dst_dir)
             tasks = []
             for item in self.project.items:
-                is_selected = (item.status == "kept")
-                target_raw_dir = selected_raw if is_selected else unselected_raw
-                target_jpeg_dir = selected_jpeg if is_selected else unselected_jpeg
+                if item.status in ("kept", "selected"):
+                    target_raw_dir = selected_raw
+                    target_jpeg_dir = selected_jpeg
+                elif item.status in ("maybe", "similar"):
+                    target_raw_dir = maybe_raw
+                    target_jpeg_dir = maybe_jpeg
+                else:
+                    target_raw_dir = unselected_raw
+                    target_jpeg_dir = unselected_jpeg
 
                 if item.raw_path and os.path.exists(item.raw_path):
                     tasks.append((item.raw_path, target_raw_dir))
@@ -55,12 +63,14 @@ class ExportWorker(QThread):
                     "base_dir": base_dir,
                     "total_copied": 0,
                     "selected_count": 0,
+                    "maybe_count": 0,
                     "unselected_count": 0,
                 })
                 return
 
-            # Ensure all destination directories exist
-            for d in (selected_raw, selected_jpeg, unselected_raw, unselected_jpeg):
+            # Ensure all destination directories that have tasks exist
+            dst_dirs = set(d for _, d in tasks)
+            for d in dst_dirs:
                 os.makedirs(d, exist_ok=True)
 
             copied_count = 0
@@ -92,6 +102,7 @@ class ExportWorker(QThread):
                 "base_dir": base_dir,
                 "total_copied": copied_count,
                 "selected_count": self.project.kept_count,
+                "maybe_count": self.project.maybe_count,
                 "unselected_count": self.project.rejected_count + self.project.pending_count,
             })
 

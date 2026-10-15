@@ -83,15 +83,24 @@ class ExportDialog(QDialog):
         struct_layout.addWidget(t_struct)
 
         p_name = sanitize_folder_name(self.project.name)
-        preview_text = (
-            f"📁 {p_name}/\n"
-            f"   ├── 📁 Selected/     ({self.project.kept_count} photos)\n"
-            f"   │    ├── 📁 RAW/\n"
-            f"   │    └── 📁 JPEG/\n"
-            f"   └── 📁 Unselected/   ({self.project.rejected_count + self.project.pending_count} photos)\n"
-            f"        ├── 📁 RAW/\n"
-            f"        └── 📁 JPEG/"
-        )
+        lines = [
+            f"📁 {p_name}/",
+            f"   ├── 📁 Selected/     ({self.project.kept_count} photos)",
+            f"   │    ├── 📁 RAW/",
+            f"   │    └── 📁 JPEG/",
+        ]
+        if self.project.maybe_count > 0:
+            lines.extend([
+                f"   ├── 📁 Maybe/        ({self.project.maybe_count} photos)",
+                f"   │    ├── 📁 RAW/",
+                f"   │    └── 📁 JPEG/",
+            ])
+        lines.extend([
+            f"   └── 📁 Unselected/   ({self.project.rejected_count + self.project.pending_count} photos)",
+            f"        ├── 📁 RAW/",
+            f"        └── 📁 JPEG/",
+        ])
+        preview_text = "\n".join(lines)
         preview_lbl = QLabel(preview_text)
         preview_lbl.setFont(get_mono_font(11))
         preview_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
