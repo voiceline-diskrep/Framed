@@ -524,5 +524,10 @@ class VideoReviewView(QWidget):
             self.player.setPosition(max(0, self.player.position() - 5000))
         elif key == Qt.Key_Right:
             self.player.setPosition(min(self.player.duration(), self.player.position() + 5000))
+        elif key == Qt.Key_F11:
+            win = self.window()
+            if hasattr(win, "toggle_fullscreen"):
+                win.toggle_fullscreen()
+            event.accept()
         else:
             super().keyPressEvent(event)

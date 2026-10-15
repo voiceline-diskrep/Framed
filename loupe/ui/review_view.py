@@ -521,5 +521,10 @@ class ReviewView(QWidget):
         elif key == Qt.Key_I:
             self._toggle_stats_panel()
             event.accept()
+        elif key == Qt.Key_F11:
+            win = self.window()
+            if hasattr(win, "toggle_fullscreen"):
+                win.toggle_fullscreen()
+            event.accept()
         else:
             super().keyPressEvent(event)

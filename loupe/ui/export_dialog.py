@@ -23,13 +23,29 @@ class ExportDialog(QDialog):
         super().__init__(parent)
         self.project = project
         self.setWindowTitle("Export Structured Photographic Session")
-        self.setFixedSize(560, 420)
+        self.setMinimumSize(520, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
 
         self.worker: Optional[ExportWorker] = None
         self.exported_dir: Optional[str] = None
 
         self._init_ui()
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(580, max(520, avail.width() - 40))
+            target_h = min(460, max(360, avail.height() - 60))
+            self.resize(target_w, target_h)
+            x = avail.x() + (avail.width() - target_w) // 2
+            y = avail.y() + max(10, (avail.height() - target_h) // 2)
+            self.move(x, y)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_to_available_screen()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)

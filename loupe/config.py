@@ -22,7 +22,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "theme_mode": "dark",
     "auto_check_updates": True,
     "update_manifest_url": "https://api.github.com/repos/voiceline-diskrep/Framed/releases/latest",
-    "app_version": "1.1.2",
+    "app_version": "1.1.3",
 }
 
 def get_app_dir() -> str:

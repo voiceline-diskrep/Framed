@@ -26,10 +26,25 @@ class VideoExportDialog(QDialog):
         self.exported_base_dir = ""
 
         self.setWindowTitle("Export Video Session — Framed")
-        self.setMinimumSize(580, 500)
-        self.resize(600, 520)
+        self.setMinimumSize(520, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
         self._init_ui()
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(600, max(520, avail.width() - 40))
+            target_h = min(520, max(360, avail.height() - 60))
+            self.resize(target_w, target_h)
+            x = avail.x() + (avail.width() - target_w) // 2
+            y = avail.y() + max(10, (avail.height() - target_h) // 2)
+            self.move(x, y)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_to_available_screen()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)

@@ -24,7 +24,7 @@ class SessionSetupDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New Culling Session — Configuration")
-        self.setMinimumSize(680, 720)
+        self.setMinimumSize(560, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
 
         self.scanned_items: List[PhotoItem] = []
@@ -32,7 +32,23 @@ class SessionSetupDialog(QDialog):
         self.created_project: Optional[Project] = None
 
         self._init_ui()
+        self._fit_to_available_screen()
         self._update_format_visibility()
+
+    def _fit_to_available_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(700, max(560, avail.width() - 40))
+            target_h = min(620, max(360, avail.height() - 60))
+            self.resize(target_w, target_h)
+            x = avail.x() + (avail.width() - target_w) // 2
+            y = avail.y() + max(10, (avail.height() - target_h) // 2)
+            self.move(x, y)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_to_available_screen()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -240,14 +256,54 @@ class SessionSetupDialog(QDialog):
 
         self.start_btn = QPushButton("Start Culling Session")
         self.start_btn.setObjectName("accentButton")
-        self.start_btn.setIcon(render_icon("loupe", 14, "#000000"))
-        self.start_btn.setMinimumHeight(38)
+        self.start_btn.setIcon(render_icon("loupe", 14, "#FFFFFF"))
+        self.start_btn.setMinimumHeight(40)
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 13px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+                color: #FFFFFF;
+                border: 1px solid #FBBF24;
+            }
+            QPushButton:pressed {
+                background-color: #B45309;
+                color: #FFFFFF;
+            }
+            QPushButton:disabled {
+                background-color: #2D2214;
+                color: #5E6672;
+                border-color: #3B414B;
+            }
+        """)
         self.start_btn.setEnabled(False)
         self.start_btn.clicked.connect(self._start_session)
         footer_layout.addWidget(self.start_btn, stretch=1)
 
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setMinimumHeight(38)
+        cancel_btn.setFont(get_body_font(12))
+        cancel_btn.setMinimumHeight(40)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 18px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
         cancel_btn.clicked.connect(self.reject)
         footer_layout.addWidget(cancel_btn)
 

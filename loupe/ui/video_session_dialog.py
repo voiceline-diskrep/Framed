@@ -22,12 +22,27 @@ class VideoSessionDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New Video Sort Session — Framed")
-        self.setMinimumSize(600, 580)
-        self.resize(620, 600)
+        self.setMinimumSize(540, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
         self.scanned_items: List[PhotoItem] = []
         self.created_project: Optional[Project] = None
         self._init_ui()
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(640, max(540, avail.width() - 40))
+            target_h = min(600, max(360, avail.height() - 60))
+            self.resize(target_w, target_h)
+            x = avail.x() + (avail.width() - target_w) // 2
+            y = avail.y() + max(10, (avail.height() - target_h) // 2)
+            self.move(x, y)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_to_available_screen()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)

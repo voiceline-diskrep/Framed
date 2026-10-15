@@ -78,6 +78,7 @@ class FramedMainWindow(QMainWindow):
         self.dashboard_view.open_project_requested.connect(self._open_project)
         self.dashboard_view.export_project_requested.connect(self._export_project)
         self.dashboard_view.open_settings_requested.connect(self._open_settings)
+        self.dashboard_view.fullscreen_requested.connect(self.toggle_fullscreen)
 
         # Photo Review screen signals
         self.review_view.back_to_dashboard.connect(self._show_dashboard)
@@ -138,6 +139,20 @@ class FramedMainWindow(QMainWindow):
         tour.exec()
 
 
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showMaximized()
+        else:
+            self.showFullScreen()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F11:
+            self.toggle_fullscreen()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 # Alias for backward compatibility
 LoupeMainWindow = FramedMainWindow
 
@@ -157,7 +172,7 @@ def create_app() -> QApplication:
 def main():
     app = create_app()
     window = FramedMainWindow()
-    window.show()
+    window.showMaximized()
     return app.exec()
 
 if __name__ == "__main__":

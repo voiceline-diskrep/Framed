@@ -641,6 +641,7 @@ class DashboardView(QWidget):
     open_project_requested = Signal(str)  # project_id
     export_project_requested = Signal(str) # project_id
     open_settings_requested = Signal()
+    fullscreen_requested = Signal()
     media_mode_changed = Signal(str)      # "photo" or "video"
 
     def __init__(self, parent=None):
@@ -741,6 +742,13 @@ class DashboardView(QWidget):
         self.settings_btn.setMinimumHeight(36)
         self.settings_btn.clicked.connect(self.open_settings_requested.emit)
         header_layout.addWidget(self.settings_btn)
+
+        self.fullscreen_btn = QPushButton("Full Screen (F11)")
+        self.fullscreen_btn.setIcon(render_icon("fit", 14, COLOR_TEXT_PRIMARY))
+        self.fullscreen_btn.setMinimumHeight(36)
+        self.fullscreen_btn.setToolTip("Toggle Full Screen Mode (or press F11)")
+        self.fullscreen_btn.clicked.connect(self.fullscreen_requested.emit)
+        header_layout.addWidget(self.fullscreen_btn)
 
         root_layout.addWidget(header_bar)
 

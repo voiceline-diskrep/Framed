@@ -52,11 +52,27 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Framed Preferences & Configuration")
-        self.setMinimumSize(600, 680)
+        self.setMinimumSize(540, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
 
         self._init_ui()
+        self._fit_to_available_screen()
         self._load_values()
+
+    def _fit_to_available_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(680, max(540, avail.width() - 40))
+            target_h = min(620, max(360, avail.height() - 60))
+            self.resize(target_w, target_h)
+            x = avail.x() + (avail.width() - target_w) // 2
+            y = avail.y() + max(10, (avail.height() - target_h) // 2)
+            self.move(x, y)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_to_available_screen()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
