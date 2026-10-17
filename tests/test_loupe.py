@@ -470,6 +470,40 @@ class TestLoupeWorkstation(unittest.TestCase):
             sm.delete_project(proj.id)
             sm.delete_folder(ws_folder.id)
 
+    def test_in_app_session_creation_views(self):
+        """Verify that SessionSetupView, VideoSessionView, and DashboardModalOverlay render in-app without popouts."""
+        from loupe.ui.session_setup_dialog import SessionSetupView
+        from loupe.ui.video_session_dialog import VideoSessionView
+        from loupe.ui.dashboard_view import DashboardView
+
+        # 1. Test in-app Photo setup view
+        photo_view = SessionSetupView()
+        self.assertIsNotNone(photo_view.start_btn)
+        self.assertIsNotNone(photo_view.btn_back)
+        photo_view.reset_form()
+        self.assertFalse(photo_view.start_btn.isEnabled())
+
+        # 2. Test in-app Video setup view
+        video_view = VideoSessionView()
+        self.assertIsNotNone(video_view.btn_create)
+        self.assertIsNotNone(video_view.btn_back)
+        video_view.reset_form()
+        self.assertFalse(video_view.btn_create.isEnabled())
+
+        # 3. Test Dashboard in-app modal overlay
+        dash = DashboardView()
+        self.assertTrue(hasattr(dash, "modal_overlay"))
+        self.assertFalse(dash.modal_overlay.isVisible())
+
+        # Verify modal overlay creates folders in-app
+        created_folders = []
+        dash.modal_overlay.show_create_folder(lambda name: created_folders.append(name))
+        self.assertFalse(dash.modal_overlay.isHidden())
+        dash.modal_overlay.hide()
+        self.assertTrue(dash.modal_overlay.isHidden())
+
 if __name__ == "__main__":
     unittest.main()
+
+
 

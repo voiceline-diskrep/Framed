@@ -15,8 +15,8 @@ from loupe.ui.icons import render_icon
 from loupe.ui.dashboard_view import DashboardView
 from loupe.ui.review_view import ReviewView
 from loupe.ui.video_review_view import VideoReviewView
-from loupe.ui.session_setup_dialog import SessionSetupDialog
-from loupe.ui.video_session_dialog import VideoSessionDialog
+from loupe.ui.session_setup_dialog import SessionSetupView, SessionSetupDialog
+from loupe.ui.video_session_dialog import VideoSessionView, VideoSessionDialog
 from loupe.ui.settings_dialog import SettingsDialog
 from loupe.ui.export_dialog import ExportDialog
 from loupe.ui.video_export_dialog import VideoExportDialog
@@ -41,10 +41,14 @@ class FramedMainWindow(QMainWindow):
         self.dashboard_view = DashboardView(self)
         self.review_view = ReviewView(self)
         self.video_review_view = VideoReviewView(self)
+        self.photo_setup_view = SessionSetupView(self)
+        self.video_setup_view = VideoSessionView(self)
 
         self.stack.addWidget(self.dashboard_view)        # Index 0: Dashboard
         self.stack.addWidget(self.review_view)           # Index 1: Photo Culling View
         self.stack.addWidget(self.video_review_view)     # Index 2: Video Sorting View
+        self.stack.addWidget(self.photo_setup_view)      # Index 3: In-App Photo Session Setup
+        self.stack.addWidget(self.video_setup_view)      # Index 4: In-App Video Session Setup
 
         self._connect_signals()
 
@@ -80,6 +84,12 @@ class FramedMainWindow(QMainWindow):
         self.dashboard_view.open_settings_requested.connect(self._open_settings)
         self.dashboard_view.fullscreen_requested.connect(self.toggle_fullscreen)
 
+        # In-App Session Setup signals (100% native, zero popout windows!)
+        self.photo_setup_view.session_created.connect(self._open_project)
+        self.photo_setup_view.cancelled.connect(self._show_dashboard)
+        self.video_setup_view.session_created.connect(self._open_project)
+        self.video_setup_view.cancelled.connect(self._show_dashboard)
+
         # Photo Review screen signals
         self.review_view.back_to_dashboard.connect(self._show_dashboard)
         self.review_view.export_requested.connect(self._export_project)
@@ -89,14 +99,13 @@ class FramedMainWindow(QMainWindow):
         self.video_review_view.export_requested.connect(self._export_project)
 
     def _open_new_session_dialog(self):
-        # Determine mode from dashboard
+        # Switch in-app natively — no popup windows!
         if self.dashboard_view.current_media_mode == "video":
-            dlg = VideoSessionDialog(self)
+            self.video_setup_view.reset_form()
+            self.stack.setCurrentWidget(self.video_setup_view)
         else:
-            dlg = SessionSetupDialog(self)
-
-        if dlg.exec() == QDialog.Accepted and dlg.created_project:
-            self._open_project(dlg.created_project.id)
+            self.photo_setup_view.reset_form()
+            self.stack.setCurrentWidget(self.photo_setup_view)
 
     def _open_project(self, project_id: str):
         proj = storage.get_project_by_id(project_id)
@@ -106,16 +115,16 @@ class FramedMainWindow(QMainWindow):
 
         if getattr(proj, "media_type", "photo") == "video":
             self.video_review_view.load_project(proj)
-            self.stack.setCurrentIndex(2)
+            self.stack.setCurrentWidget(self.video_review_view)
             self.video_review_view.setFocus()
         else:
             self.review_view.load_project(proj)
-            self.stack.setCurrentIndex(1)
+            self.stack.setCurrentWidget(self.review_view)
             self.review_view.setFocus()
 
     def _show_dashboard(self):
         self.dashboard_view.refresh()
-        self.stack.setCurrentIndex(0)
+        self.stack.setCurrentWidget(self.dashboard_view)
 
     def _export_project(self, project_id: str):
         proj = storage.get_project_by_id(project_id)

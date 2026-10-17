@@ -4,7 +4,8 @@ import os
 import subprocess
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QFileDialog, QProgressBar, QMessageBox, QFrame, QCheckBox
+    QLineEdit, QFileDialog, QProgressBar, QMessageBox, QFrame,
+    QCheckBox, QWidget, QScrollArea, QApplication
 )
 from PySide6.QtCore import Qt
 from loupe.models import Project
@@ -27,7 +28,7 @@ class VideoExportDialog(QDialog):
         self.exported_base_dir = ""
 
         self.setWindowTitle("Export Video Session — Framed")
-        self.setMinimumSize(520, 360)
+        self.setMinimumSize(540, 420)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
         self._init_ui()
         self._fit_to_available_screen()
@@ -36,8 +37,8 @@ class VideoExportDialog(QDialog):
         screen = self.screen() or QApplication.primaryScreen()
         if screen:
             avail = screen.availableGeometry()
-            target_w = min(600, max(520, avail.width() - 40))
-            target_h = min(520, max(360, avail.height() - 60))
+            target_w = min(680, max(560, avail.width() - 40))
+            target_h = min(680, max(500, avail.height() - 60))
             self.resize(target_w, target_h)
             x = avail.x() + (avail.width() - target_w) // 2
             y = avail.y() + max(10, (avail.height() - target_h) // 2)
@@ -48,9 +49,20 @@ class VideoExportDialog(QDialog):
         self._fit_to_available_screen()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(18)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 16)
+        main_layout.setSpacing(14)
+
+        # Scrollable content area so it never squishes on any display scaling
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(16)
 
         # Header
         h_layout = QVBoxLayout()
@@ -221,20 +233,39 @@ class VideoExportDialog(QDialog):
         p_layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_frame)
 
-        layout.addStretch()
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll, stretch=1)
 
-        # Action Buttons
+        # Pinned Action Buttons
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(12)
 
         self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setFont(get_body_font(12))
+        self.btn_cancel.setMinimumHeight(40)
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 18px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
         self.btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(self.btn_cancel)
 
         btn_row.addStretch()
 
         self.btn_open_folder = QPushButton("Open Folder")
+        self.btn_open_folder.setFont(get_body_font(12, bold=True))
         self.btn_open_folder.setIcon(render_icon("folder", 13, COLOR_ACCENT))
+        self.btn_open_folder.setMinimumHeight(40)
         self.btn_open_folder.setVisible(False)
         self.btn_open_folder.clicked.connect(self._open_output_folder)
         btn_row.addWidget(self.btn_open_folder)
@@ -242,11 +273,32 @@ class VideoExportDialog(QDialog):
         self.btn_start = QPushButton("Start Export")
         self.btn_start.setObjectName("accentButton")
         self.btn_start.setIcon(render_icon("export", 13, "#FFFFFF"))
-        self.btn_start.setMinimumHeight(36)
+        self.btn_start.setFont(get_body_font(12, bold=True))
+        self.btn_start.setMinimumHeight(40)
+        self.btn_start.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 13px;
+                border: 1px solid #F59E0B;
+                border-radius: 4px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+                color: #FFFFFF;
+            }
+            QPushButton:disabled {
+                background-color: #2D2214;
+                color: #5E6672;
+                border-color: #3B414B;
+            }
+        """)
         self.btn_start.clicked.connect(self._start_export)
         btn_row.addWidget(self.btn_start)
 
-        layout.addLayout(btn_row)
+        main_layout.addLayout(btn_row)
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "Select Export Destination", self.edit_dir.text())

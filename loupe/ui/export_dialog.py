@@ -36,8 +36,8 @@ class ExportDialog(QDialog):
         screen = self.screen() or QApplication.primaryScreen()
         if screen:
             avail = screen.availableGeometry()
-            target_w = min(580, max(520, avail.width() - 40))
-            target_h = min(460, max(360, avail.height() - 60))
+            target_w = min(680, max(560, avail.width() - 40))
+            target_h = min(680, max(500, avail.height() - 60))
             self.resize(target_w, target_h)
             x = avail.x() + (avail.width() - target_w) // 2
             y = avail.y() + max(10, (avail.height() - target_h) // 2)
@@ -49,8 +49,19 @@ class ExportDialog(QDialog):
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(24, 24, 24, 24)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(20, 20, 20, 16)
+        main_layout.setSpacing(14)
+
+        # Scrollable content area so it never squishes on any display scaling
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(4, 4, 4, 4)
+        content_layout.setSpacing(16)
 
         # Header
         header = QVBoxLayout()
@@ -62,7 +73,7 @@ class ExportDialog(QDialog):
         sub.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         header.addWidget(title)
         header.addWidget(sub)
-        main_layout.addLayout(header)
+        content_layout.addLayout(header)
 
         # Destination Folder Input
         dest_layout = QVBoxLayout()
@@ -73,11 +84,40 @@ class ExportDialog(QDialog):
 
         row_dest = QHBoxLayout()
         self.dest_edit = QLineEdit()
+        self.dest_edit.setMinimumHeight(38)
+        self.dest_edit.setFont(get_body_font(12))
+        self.dest_edit.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 0 10px;
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
         default_dir = config.get("default_export_dir", "") or os.path.join(os.path.expanduser("~"), "Pictures", "Framed Exports")
         self.dest_edit.setText(default_dir)
         row_dest.addWidget(self.dest_edit, stretch=1)
 
-        browse_btn = QPushButton("Browse")
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setFont(get_body_font(12, bold=True))
+        browse_btn.setMinimumHeight(38)
+        browse_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: #2A2E35;
+            }}
+        """)
         browse_btn.clicked.connect(self._browse_dest)
         row_dest.addWidget(browse_btn)
         dest_layout.addLayout(row_dest)
@@ -90,7 +130,7 @@ class ExportDialog(QDialog):
         self.cb_workspace.toggled.connect(self._on_workspace_toggled)
         dest_layout.addWidget(self.cb_workspace)
 
-        main_layout.addLayout(dest_layout)
+        content_layout.addLayout(dest_layout)
 
         # Structure Preview Card
         struct_card = QFrame()
@@ -98,8 +138,8 @@ class ExportDialog(QDialog):
             QFrame {{
                 background-color: {COLOR_BG_SURFACE};
                 border: 1px solid {COLOR_BORDER_DISTINCT};
-                border-radius: 2px;
-                padding: 12px;
+                border-radius: 4px;
+                padding: 14px;
             }}
         """)
         struct_layout = QVBoxLayout(struct_card)
@@ -114,19 +154,20 @@ class ExportDialog(QDialog):
         self.preview_lbl.setFont(get_mono_font(11))
         self.preview_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
         struct_layout.addWidget(self.preview_lbl)
-        main_layout.addWidget(struct_card)
+        content_layout.addWidget(struct_card)
 
         self._update_hierarchy_preview()
 
         # Progress / Status Frame
         self.status_frame = QFrame()
-        self.status_frame.setStyleSheet(f"background-color: {COLOR_BG_ELEVATED}; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 2px; padding: 10px;")
+        self.status_frame.setStyleSheet(f"background-color: {COLOR_BG_ELEVATED}; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 4px; padding: 10px;")
         status_l = QVBoxLayout(self.status_frame)
         status_l.setSpacing(6)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(8)
         status_l.addWidget(self.progress_bar)
 
         row_stat = QHBoxLayout()
@@ -142,27 +183,67 @@ class ExportDialog(QDialog):
         row_stat.addWidget(self.count_lbl)
         status_l.addLayout(row_stat)
 
-        main_layout.addWidget(self.status_frame)
+        content_layout.addWidget(self.status_frame)
 
-        # Action Buttons
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll, stretch=1)
+
+        # Pinned Action Buttons Footer
         footer = QHBoxLayout()
-        footer.setSpacing(10)
+        footer.setSpacing(12)
 
         self.start_btn = QPushButton("Export Photos")
         self.start_btn.setObjectName("accentButton")
-        self.start_btn.setIcon(render_icon("export", 14, "#000000"))
-        self.start_btn.setMinimumHeight(38)
+        self.start_btn.setIcon(render_icon("export", 14, "#FFFFFF"))
+        self.start_btn.setFont(get_body_font(12, bold=True))
+        self.start_btn.setMinimumHeight(40)
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 13px;
+                border: 1px solid #F59E0B;
+                border-radius: 4px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+                color: #FFFFFF;
+            }
+            QPushButton:disabled {
+                background-color: #2D2214;
+                color: #5E6672;
+                border-color: #3B414B;
+            }
+        """)
         self.start_btn.clicked.connect(self._start_export)
         footer.addWidget(self.start_btn, stretch=1)
 
         self.open_folder_btn = QPushButton("Open in Explorer")
-        self.open_folder_btn.setMinimumHeight(38)
+        self.open_folder_btn.setFont(get_body_font(12, bold=True))
+        self.open_folder_btn.setMinimumHeight(40)
         self.open_folder_btn.setVisible(False)
         self.open_folder_btn.clicked.connect(self._open_in_explorer)
         footer.addWidget(self.open_folder_btn)
 
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setMinimumHeight(38)
+        self.cancel_btn.setFont(get_body_font(12))
+        self.cancel_btn.setMinimumHeight(40)
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 18px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
         self.cancel_btn.clicked.connect(self._cancel_or_close)
         footer.addWidget(self.cancel_btn)
 

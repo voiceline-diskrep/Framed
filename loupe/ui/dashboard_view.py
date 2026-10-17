@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QDate, QSize
+from PySide6.QtGui import QPainter, QColor
 from loupe.models import Folder, Project
 from loupe.storage import storage
 from loupe.config import config
@@ -21,6 +22,619 @@ from loupe.ui.theme import (
     get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
+
+
+class DashboardModalOverlay(QWidget):
+    """Semi-transparent in-app modal overlay to host cards natively inside DashboardView."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setVisible(False)
+        self.setObjectName("DashboardModalOverlay")
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(20, 20, 20, 20)
+        outer_layout.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("inAppModalCard")
+        self.card.setFixedWidth(460)
+        self.card.setStyleSheet(f"""
+            QFrame#inAppModalCard {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 6px;
+            }}
+            QLineEdit, QComboBox, QDateEdit {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        self.card_layout = QVBoxLayout(self.card)
+        self.card_layout.setContentsMargins(24, 22, 24, 22)
+        self.card_layout.setSpacing(14)
+
+        outer_layout.addWidget(self.card)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(10, 12, 16, 215))
+
+    def mousePressEvent(self, event):
+        if not self.card.geometry().contains(event.pos()):
+            self.hide()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.hide()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _clear_card(self):
+        while self.card_layout.count():
+            item = self.card_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+            l = item.layout()
+            if l:
+                while l.count():
+                    sub = l.takeAt(0)
+                    if sub.widget():
+                        sub.widget().deleteLater()
+
+    def show_create_folder(self, on_created):
+        self._clear_card()
+
+        # Header
+        h_row = QHBoxLayout()
+        title = QLabel("Create Workspace Folder")
+        title.setFont(get_display_font(15, bold=True))
+        h_row.addWidget(title)
+        h_row.addStretch()
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(24, 24)
+        btn_x.setStyleSheet(f"border: none; color: {COLOR_TEXT_MUTED}; font-size: 14px; font-weight: bold;")
+        btn_x.clicked.connect(self.hide)
+        h_row.addWidget(btn_x)
+        self.card_layout.addLayout(h_row)
+
+        desc = QLabel("Enter a name for your new workspace category (e.g. Commercial, Weddings, Portraits):")
+        desc.setFont(get_body_font(12))
+        desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
+        desc.setWordWrap(True)
+        self.card_layout.addWidget(desc)
+
+        edit = QLineEdit()
+        edit.setPlaceholderText("Folder Name...")
+        edit.setMinimumHeight(38)
+        self.card_layout.addWidget(edit)
+
+        # Buttons
+        b_row = QHBoxLayout()
+        b_row.setSpacing(10)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFont(get_body_font(12))
+        btn_cancel.setMinimumHeight(36)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.hide)
+        b_row.addWidget(btn_cancel)
+
+        b_row.addStretch()
+
+        btn_confirm = QPushButton("Create Folder")
+        btn_confirm.setObjectName("accentButton")
+        btn_confirm.setFont(get_body_font(12, bold=True))
+        btn_confirm.setMinimumHeight(36)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 12px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+        """)
+
+        def _submit():
+            val = edit.text().strip()
+            if val:
+                self.hide()
+                on_created(val)
+
+        btn_confirm.clicked.connect(_submit)
+        edit.returnPressed.connect(_submit)
+        b_row.addWidget(btn_confirm)
+
+        self.card_layout.addLayout(b_row)
+
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+        edit.setFocus()
+
+    def show_rename_folder(self, current_name, on_renamed):
+        self._clear_card()
+
+        h_row = QHBoxLayout()
+        title = QLabel("Rename Workspace Folder")
+        title.setFont(get_display_font(15, bold=True))
+        h_row.addWidget(title)
+        h_row.addStretch()
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(24, 24)
+        btn_x.setStyleSheet(f"border: none; color: {COLOR_TEXT_MUTED}; font-size: 14px; font-weight: bold;")
+        btn_x.clicked.connect(self.hide)
+        h_row.addWidget(btn_x)
+        self.card_layout.addLayout(h_row)
+
+        desc = QLabel("Enter a new name for this workspace folder:")
+        desc.setFont(get_body_font(12))
+        desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        self.card_layout.addWidget(desc)
+
+        edit = QLineEdit(current_name)
+        edit.setMinimumHeight(38)
+        self.card_layout.addWidget(edit)
+
+        b_row = QHBoxLayout()
+        b_row.setSpacing(10)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFont(get_body_font(12))
+        btn_cancel.setMinimumHeight(36)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.hide)
+        b_row.addWidget(btn_cancel)
+
+        b_row.addStretch()
+
+        btn_confirm = QPushButton("Save Name")
+        btn_confirm.setObjectName("accentButton")
+        btn_confirm.setFont(get_body_font(12, bold=True))
+        btn_confirm.setMinimumHeight(36)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 12px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+        """)
+
+        def _submit():
+            val = edit.text().strip()
+            if val:
+                self.hide()
+                on_renamed(val)
+
+        btn_confirm.clicked.connect(_submit)
+        edit.returnPressed.connect(_submit)
+        b_row.addWidget(btn_confirm)
+
+        self.card_layout.addLayout(b_row)
+
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+        edit.setFocus()
+        edit.selectAll()
+
+    def show_edit_project(self, project, on_saved):
+        self._clear_card()
+
+        h_row = QHBoxLayout()
+        title = QLabel(f"Edit Session Details")
+        title.setFont(get_display_font(15, bold=True))
+        h_row.addWidget(title)
+        h_row.addStretch()
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(24, 24)
+        btn_x.setStyleSheet(f"border: none; color: {COLOR_TEXT_MUTED}; font-size: 14px; font-weight: bold;")
+        btn_x.clicked.connect(self.hide)
+        h_row.addWidget(btn_x)
+        self.card_layout.addLayout(h_row)
+
+        self.card_layout.addWidget(QLabel("Session Name:"))
+        name_edit = QLineEdit(project.name)
+        name_edit.setMinimumHeight(38)
+        self.card_layout.addWidget(name_edit)
+
+        self.card_layout.addWidget(QLabel("Assigned Workspace Folder:"))
+        combo = QComboBox()
+        combo.setMinimumHeight(38)
+        folders = storage.get_folders()
+        sel_idx = 0
+        for i, f in enumerate(folders):
+            combo.addItem(f.name, f.id)
+            if f.id == project.folder_id:
+                sel_idx = i
+        combo.setCurrentIndex(sel_idx)
+        self.card_layout.addWidget(combo)
+
+        self.card_layout.addWidget(QLabel("Shoot Date:"))
+        date_edit = QDateEdit()
+        date_edit.setCalendarPopup(True)
+        date_edit.setDisplayFormat("yyyy-MM-dd")
+        date_edit.setMinimumHeight(38)
+        qd = QDate.fromString(project.shoot_date, "yyyy-MM-dd")
+        if not qd.isValid():
+            qd = QDate.currentDate()
+        date_edit.setDate(qd)
+        self.card_layout.addWidget(date_edit)
+
+        b_row = QHBoxLayout()
+        b_row.setSpacing(10)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFont(get_body_font(12))
+        btn_cancel.setMinimumHeight(36)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.hide)
+        b_row.addWidget(btn_cancel)
+
+        b_row.addStretch()
+
+        btn_confirm = QPushButton("Save Changes")
+        btn_confirm.setObjectName("accentButton")
+        btn_confirm.setFont(get_body_font(12, bold=True))
+        btn_confirm.setMinimumHeight(36)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 12px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+        """)
+
+        def _submit():
+            n = name_edit.text().strip()
+            fid = combo.currentData()
+            d = date_edit.date().toString("yyyy-MM-dd")
+            self.hide()
+            on_saved(n, fid, d)
+
+        btn_confirm.clicked.connect(_submit)
+        name_edit.returnPressed.connect(_submit)
+        b_row.addWidget(btn_confirm)
+
+        self.card_layout.addLayout(b_row)
+
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+        name_edit.setFocus()
+        name_edit.selectAll()
+
+    def show_edit_folder_project(self, current_folder_id, on_saved):
+        self._clear_card()
+
+        h_row = QHBoxLayout()
+        title = QLabel("Edit Folder / Move Session")
+        title.setFont(get_display_font(15, bold=True))
+        h_row.addWidget(title)
+        h_row.addStretch()
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(24, 24)
+        btn_x.setStyleSheet(f"border: none; color: {COLOR_TEXT_MUTED}; font-size: 14px; font-weight: bold;")
+        btn_x.clicked.connect(self.hide)
+        h_row.addWidget(btn_x)
+        self.card_layout.addLayout(h_row)
+
+        folder = storage.get_folder_by_id(current_folder_id)
+        current_name = folder.name if folder else "Personal"
+
+        self.card_layout.addWidget(QLabel("Folder Name:"))
+        name_edit = QLineEdit(current_name)
+        name_edit.setMinimumHeight(38)
+        self.card_layout.addWidget(name_edit)
+
+        self.card_layout.addWidget(QLabel("Move this session to another folder:"))
+        combo = QComboBox()
+        combo.setMinimumHeight(38)
+        folders = storage.get_folders()
+        sel_idx = 0
+        for i, f in enumerate(folders):
+            combo.addItem(f.name, f.id)
+            if f.id == current_folder_id:
+                sel_idx = i
+        combo.setCurrentIndex(sel_idx)
+        self.card_layout.addWidget(combo)
+
+        b_row = QHBoxLayout()
+        b_row.setSpacing(10)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFont(get_body_font(12))
+        btn_cancel.setMinimumHeight(36)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.hide)
+        b_row.addWidget(btn_cancel)
+
+        b_row.addStretch()
+
+        btn_confirm = QPushButton("Save Changes")
+        btn_confirm.setObjectName("accentButton")
+        btn_confirm.setFont(get_body_font(12, bold=True))
+        btn_confirm.setMinimumHeight(36)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 12px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+        """)
+
+        def _submit():
+            n = name_edit.text().strip()
+            fid = combo.currentData()
+            self.hide()
+            on_saved(n, fid)
+
+        btn_confirm.clicked.connect(_submit)
+        name_edit.returnPressed.connect(_submit)
+        b_row.addWidget(btn_confirm)
+
+        self.card_layout.addLayout(b_row)
+
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+        name_edit.setFocus()
+
+    def show_edit_date(self, current_date_str, on_saved):
+        self._clear_card()
+
+        h_row = QHBoxLayout()
+        title = QLabel("Edit Shoot Date")
+        title.setFont(get_display_font(15, bold=True))
+        h_row.addWidget(title)
+        h_row.addStretch()
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(24, 24)
+        btn_x.setStyleSheet(f"border: none; color: {COLOR_TEXT_MUTED}; font-size: 14px; font-weight: bold;")
+        btn_x.clicked.connect(self.hide)
+        h_row.addWidget(btn_x)
+        self.card_layout.addLayout(h_row)
+
+        self.card_layout.addWidget(QLabel("Select Date:"))
+        date_edit = QDateEdit()
+        date_edit.setCalendarPopup(True)
+        date_edit.setDisplayFormat("yyyy-MM-dd")
+        date_edit.setMinimumHeight(38)
+        qd = QDate.fromString(current_date_str, "yyyy-MM-dd")
+        if not qd.isValid():
+            qd = QDate.currentDate()
+        date_edit.setDate(qd)
+        self.card_layout.addWidget(date_edit)
+
+        b_row = QHBoxLayout()
+        b_row.setSpacing(10)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFont(get_body_font(12))
+        btn_cancel.setMinimumHeight(36)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.hide)
+        b_row.addWidget(btn_cancel)
+
+        b_row.addStretch()
+
+        btn_confirm = QPushButton("Save Date")
+        btn_confirm.setObjectName("accentButton")
+        btn_confirm.setFont(get_body_font(12, bold=True))
+        btn_confirm.setMinimumHeight(36)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 12px;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+        """)
+
+        def _submit():
+            d = date_edit.date().toString("yyyy-MM-dd")
+            self.hide()
+            on_saved(d)
+
+        btn_confirm.clicked.connect(_submit)
+        b_row.addWidget(btn_confirm)
+
+        self.card_layout.addLayout(b_row)
+
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+
+    def show_confirm_delete(self, title, message, on_confirmed, confirm_text="Delete", is_destructive=True):
+        self._clear_card()
+
+        h_row = QHBoxLayout()
+        t_lbl = QLabel(title)
+        t_lbl.setFont(get_display_font(15, bold=True))
+        h_row.addWidget(t_lbl)
+        h_row.addStretch()
+        btn_x = QPushButton("✕")
+        btn_x.setFixedSize(24, 24)
+        btn_x.setStyleSheet(f"border: none; color: {COLOR_TEXT_MUTED}; font-size: 14px; font-weight: bold;")
+        btn_x.clicked.connect(self.hide)
+        h_row.addWidget(btn_x)
+        self.card_layout.addLayout(h_row)
+
+        desc = QLabel(message)
+        desc.setFont(get_body_font(12))
+        desc.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
+        desc.setWordWrap(True)
+        self.card_layout.addWidget(desc)
+
+        b_row = QHBoxLayout()
+        b_row.setSpacing(10)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFont(get_body_font(12))
+        btn_cancel.setMinimumHeight(36)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.hide)
+        b_row.addWidget(btn_cancel)
+
+        b_row.addStretch()
+
+        btn_confirm = QPushButton(confirm_text)
+        btn_confirm.setFont(get_body_font(12, bold=True))
+        btn_confirm.setMinimumHeight(36)
+        if is_destructive:
+            btn_confirm.setStyleSheet("""
+                QPushButton {
+                    background-color: #EF4444;
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    border: 1px solid #DC2626;
+                    border-radius: 3px;
+                    padding: 0 18px;
+                }
+                QPushButton:hover {
+                    background-color: #DC2626;
+                }
+            """)
+        else:
+            btn_confirm.setStyleSheet("""
+                QPushButton {
+                    background-color: #D97706;
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    border: 1px solid #F59E0B;
+                    border-radius: 3px;
+                    padding: 0 18px;
+                }
+            """)
+
+        def _submit():
+            self.hide()
+            on_confirmed()
+
+        btn_confirm.clicked.connect(_submit)
+        b_row.addWidget(btn_confirm)
+
+        self.card_layout.addLayout(b_row)
+
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+
 
 class EditDateDialog(QDialog):
     """Clean dialog to edit a project's shoot date."""
@@ -219,6 +833,9 @@ class ProjectCard(QFrame):
     delete_clicked = Signal(str)  # project_id
     date_changed = Signal(str, str) # project_id, new_date
     refresh_requested = Signal()
+    edit_requested = Signal(object) # Project
+    edit_folder_requested = Signal(object) # Project
+    edit_date_requested = Signal(object) # Project
 
     def __init__(self, project: Project, parent=None):
         super().__init__(parent)
@@ -532,33 +1149,13 @@ class ProjectCard(QFrame):
         main_layout.addLayout(actions_layout)
 
     def _on_edit_session(self):
-        dlg = EditProjectDialog(self.project, self)
-        if dlg.exec() == QDialog.Accepted:
-            data = dlg.get_data()
-            if data["name"]:
-                storage.update_project_name(self.project.id, data["name"])
-            if data["folder_id"]:
-                storage.update_project_folder(self.project.id, data["folder_id"])
-            if data["shoot_date"]:
-                storage.update_project_date(self.project.id, data["shoot_date"])
-            self.refresh_requested.emit()
+        self.edit_requested.emit(self.project)
 
     def _on_edit_folder(self):
-        dlg = EditFolderDialog(self.project.folder_id, self.project.id, self)
-        if dlg.exec() == QDialog.Accepted:
-            new_name = dlg.get_folder_name()
-            target_folder_id = dlg.get_selected_folder_id()
-            if new_name:
-                storage.rename_folder(self.project.folder_id, new_name)
-            if target_folder_id and target_folder_id != self.project.folder_id:
-                storage.update_project_folder(self.project.id, target_folder_id)
-            self.refresh_requested.emit()
+        self.edit_folder_requested.emit(self.project)
 
     def _on_edit_date(self):
-        dlg = EditDateDialog(self.project.shoot_date, self)
-        if dlg.exec() == QDialog.Accepted:
-            new_date = dlg.get_date_str()
-            self.date_changed.emit(self.project.id, new_date)
+        self.edit_date_requested.emit(self.project)
 
     def _on_add_edited_files(self):
         initial_dir = ""
@@ -649,7 +1246,13 @@ class DashboardView(QWidget):
         self.selected_folder_id: Optional[str] = None
         self.current_media_mode: str = "photo"  # "photo" or "video"
         self._init_ui()
+        self.modal_overlay = DashboardModalOverlay(self)
         self.refresh()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "modal_overlay") and self.modal_overlay:
+            self.modal_overlay.setGeometry(self.rect())
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
@@ -1041,14 +1644,43 @@ class DashboardView(QWidget):
                 card.delete_clicked.connect(self._on_delete_project)
                 card.date_changed.connect(self._on_project_date_changed)
                 card.refresh_requested.connect(self.refresh)
+                card.edit_requested.connect(self._on_edit_project_modal)
+                card.edit_folder_requested.connect(self._on_edit_folder_modal)
+                card.edit_date_requested.connect(self._on_edit_date_modal)
                 self.projects_layout.addWidget(card)
 
+    def _on_edit_project_modal(self, proj: Project):
+        def _saved(name, folder_id, shoot_date):
+            if name:
+                storage.update_project_name(proj.id, name)
+            if folder_id:
+                storage.update_project_folder(proj.id, folder_id)
+            if shoot_date:
+                storage.update_project_date(proj.id, shoot_date)
+            self.refresh()
+        self.modal_overlay.show_edit_project(proj, _saved)
+
+    def _on_edit_folder_modal(self, proj: Project):
+        def _saved(new_name, target_folder_id):
+            if new_name:
+                storage.rename_folder(proj.folder_id, new_name)
+            if target_folder_id and target_folder_id != proj.folder_id:
+                storage.update_project_folder(proj.id, target_folder_id)
+            self.refresh()
+        self.modal_overlay.show_edit_folder_project(proj.folder_id, _saved)
+
+    def _on_edit_date_modal(self, proj: Project):
+        def _saved(new_date):
+            storage.update_project_date(proj.id, new_date)
+            self.refresh()
+        self.modal_overlay.show_edit_date(proj.shoot_date, _saved)
+
     def _create_new_folder(self):
-        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name (e.g. School, Weddings, Commercial):")
-        if ok and name.strip():
-            new_f = storage.create_folder(name.strip())
+        def _created(name):
+            new_f = storage.create_folder(name)
             self.selected_folder_id = new_f.id
             self.refresh()
+        self.modal_overlay.show_create_folder(_created)
 
     def _rename_selected_folder(self):
         if not self.selected_folder_id:
@@ -1056,12 +1688,10 @@ class DashboardView(QWidget):
         folder = storage.get_folder_by_id(self.selected_folder_id)
         if not folder:
             return
-        dlg = EditFolderDialog(folder.id, None, self)
-        if dlg.exec() == QDialog.Accepted:
-            new_name = dlg.get_folder_name()
-            if new_name:
-                storage.rename_folder(folder.id, new_name)
-                self.refresh()
+        def _renamed(new_name):
+            storage.rename_folder(folder.id, new_name)
+            self.refresh()
+        self.modal_overlay.show_rename_folder(folder.name, _renamed)
 
     def _delete_selected_folder(self):
         if not self.selected_folder_id:
@@ -1069,28 +1699,32 @@ class DashboardView(QWidget):
         folder = storage.get_folder_by_id(self.selected_folder_id)
         if not folder:
             return
-        confirm = QMessageBox.question(
-            self, "Delete Folder",
-            f"Are you sure you want to delete folder '{folder.name}'?\nProjects will be preserved in other folders.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm == QMessageBox.Yes:
+        def _confirmed():
             storage.delete_folder(folder.id)
             self.selected_folder_id = None
             self.refresh()
+        self.modal_overlay.show_confirm_delete(
+            "Delete Workspace Folder",
+            f"Are you sure you want to delete folder '{folder.name}'?\nProjects will be preserved in other folders.",
+            _confirmed,
+            confirm_text="Delete Folder",
+            is_destructive=True
+        )
 
     def _on_delete_project(self, project_id: str):
         proj = storage.get_project_by_id(project_id)
         if not proj:
             return
-        confirm = QMessageBox.question(
-            self, "Delete Session",
-            f"Delete session '{proj.name}'?\nOriginal media on disk will never be touched.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm == QMessageBox.Yes:
+        def _confirmed():
             storage.delete_project(project_id)
             self._load_projects_for_selection()
+        self.modal_overlay.show_confirm_delete(
+            "Delete Session",
+            f"Delete session '{proj.name}'?\nOriginal media on disk will never be touched.",
+            _confirmed,
+            confirm_text="Delete Session",
+            is_destructive=True
+        )
 
     def _on_project_date_changed(self, project_id: str, new_date: str):
         storage.update_project_date(project_id, new_date)

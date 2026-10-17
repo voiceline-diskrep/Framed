@@ -1,13 +1,13 @@
-"""Session setup dialog asking format choice, pair synchronization, and plain-language RAM budget allocation."""
+"""In-app photo session setup view and dialog for configuring shoot ingestion, pair sync, and RAM preloading."""
 
 import os
 from typing import Optional, List, Dict
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QRadioButton, QButtonGroup, QCheckBox, QSlider, QSpinBox,
-    QFileDialog, QFrame, QMessageBox, QDateEdit, QWidget, QScrollArea
+    QFileDialog, QFrame, QMessageBox, QDateEdit, QScrollArea, QApplication
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, Signal
 from loupe.config import config, get_total_system_ram_gb
 from loupe.storage import storage
 from loupe.models import Project, PhotoItem, Folder
@@ -16,73 +16,115 @@ from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS, COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED, COLOR_ACCENT, COLOR_STATUS_KEPT,
-    get_display_font, get_body_font, get_mono_font
+    COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
 
-class SessionSetupDialog(QDialog):
+
+class SessionSetupView(QWidget):
+    """Full in-app view for setting up and ingesting new photographic culling sessions."""
+
+    session_created = Signal(str)  # Emits project_id when project is created
+    cancelled = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("New Culling Session — Configuration")
-        self.setMinimumSize(560, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
 
         self.scanned_items: List[PhotoItem] = []
         self.total_bytes_scanned: int = 0
         self.created_project: Optional[Project] = None
+        self.calculated_batch_size: int = 16
 
         self._init_ui()
-        self._fit_to_available_screen()
         self._update_format_visibility()
-
-    def _fit_to_available_screen(self):
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen:
-            avail = screen.availableGeometry()
-            target_w = min(700, max(560, avail.width() - 40))
-            target_h = min(620, max(360, avail.height() - 60))
-            self.resize(target_w, target_h)
-            x = avail.x() + (avail.width() - target_w) // 2
-            y = avail.y() + max(10, (avail.height() - target_h) // 2)
-            self.move(x, y)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._fit_to_available_screen()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(24, 24, 24, 24)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Header
-        header_layout = QVBoxLayout()
-        header_layout.setSpacing(4)
-        title = QLabel("Setup New Culling Session")
-        title.setFont(get_display_font(18, bold=True))
-        sub = QLabel("Select photo source, choose format handling, and configure memory preloading.")
-        sub.setFont(get_body_font(13))
-        sub.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
-        header_layout.addWidget(title)
-        header_layout.addWidget(sub)
-        main_layout.addLayout(header_layout)
+        # 1. Top Navigation Bar (Always visible)
+        top_bar = QFrame()
+        top_bar.setObjectName("setupTopBar")
+        top_bar.setStyleSheet(f"""
+            QFrame#setupTopBar {{
+                background-color: {COLOR_BG_SURFACE};
+                border-bottom: 1px solid {COLOR_BORDER_SUBTLE};
+            }}
+        """)
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(24, 12, 24, 12)
+        top_layout.setSpacing(16)
 
-        # Scrollable form
+        self.btn_back = QPushButton("  Back to Dashboard")
+        self.btn_back.setIcon(render_icon("arrow_left", 14, COLOR_TEXT_PRIMARY))
+        self.btn_back.setFont(get_body_font(12, bold=True))
+        self.btn_back.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                color: {COLOR_TEXT_PRIMARY};
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_BG_ELEVATED};
+                border-color: {COLOR_TEXT_SECONDARY};
+            }}
+        """)
+        self.btn_back.clicked.connect(self.cancelled.emit)
+        top_layout.addWidget(self.btn_back)
+
+        title_lbl = QLabel("NEW PHOTO CULLING SESSION")
+        title_lbl.setFont(get_mono_font(11, bold=True))
+        title_lbl.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
+        top_layout.addWidget(title_lbl)
+
+        top_layout.addStretch()
+
+        badge = QLabel("PHOTO INGEST ENGINE")
+        badge.setFont(get_mono_font(10, bold=True))
+        badge.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; background: {COLOR_BG_ELEVATED}; padding: 4px 8px; border-radius: 3px;")
+        top_layout.addWidget(badge)
+
+        main_layout.addWidget(top_bar)
+
+        # 2. Scrollable Form Area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
-        container = QWidget()
-        form_layout = QVBoxLayout(container)
-        form_layout.setContentsMargins(0, 8, 0, 8)
-        form_layout.setSpacing(18)
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        content_outer_layout = QHBoxLayout(scroll_content)
+        content_outer_layout.setContentsMargins(24, 20, 24, 20)
 
-        # Section 1: Session Details
+        # Centered container with responsive max-width for comfortable layout
+        center_container = QWidget()
+        center_container.setMaximumWidth(880)
+        center_layout = QVBoxLayout(center_container)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(18)
+
+        # Header intro
+        head_v = QVBoxLayout()
+        head_v.setSpacing(4)
+        h_title = QLabel("Setup New Culling Session")
+        h_title.setFont(get_display_font(20, bold=True))
+        h_sub = QLabel("Select your photo directory, configure RAW & JPEG handling, and calibrate RAM preloading.")
+        h_sub.setFont(get_body_font(13))
+        h_sub.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        head_v.addWidget(h_title)
+        head_v.addWidget(h_sub)
+        center_layout.addLayout(head_v)
+
+        # Section 1: Session Details & Source
         sec1 = self._create_card()
         sec1_layout = QVBoxLayout(sec1)
-        sec1_layout.setSpacing(12)
+        sec1_layout.setSpacing(14)
 
-        sec1_title = QLabel("1. SESSION DETAILS & SOURCE")
+        sec1_title = QLabel("1. SESSION DETAILS & WORKSPACE")
         sec1_title.setFont(get_mono_font(11, bold=True))
         sec1_title.setStyleSheet(f"color: {COLOR_ACCENT};")
         sec1_layout.addWidget(sec1_title)
@@ -94,13 +136,41 @@ class SessionSetupDialog(QDialog):
         v1 = QVBoxLayout()
         v1.addWidget(QLabel("Session Name:"))
         self.name_edit = QLineEdit("Nordic Coastal Shoot")
+        self.name_edit.setFont(get_body_font(12))
+        self.name_edit.setMinimumHeight(38)
+        self.name_edit.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 0 10px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
         v1.addWidget(self.name_edit)
         row1.addLayout(v1, stretch=2)
 
-        # Folder
+        # Workspace Folder
         v2 = QVBoxLayout()
         v2.addWidget(QLabel("Workspace Folder:"))
         self.folder_combo = QComboBox()
+        self.folder_combo.setFont(get_body_font(12))
+        self.folder_combo.setMinimumHeight(38)
+        self.folder_combo.setStyleSheet(f"""
+            QComboBox {{
+                padding: 0 10px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QComboBox:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
         self._populate_folders()
         v2.addWidget(self.folder_combo)
         row1.addLayout(v2, stretch=1)
@@ -112,6 +182,20 @@ class SessionSetupDialog(QDialog):
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDate(QDate.currentDate())
         self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setFont(get_body_font(12))
+        self.date_edit.setMinimumHeight(38)
+        self.date_edit.setStyleSheet(f"""
+            QDateEdit {{
+                padding: 0 10px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QDateEdit:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
         v3.addWidget(self.date_edit)
         row1.addLayout(v3, stretch=1)
 
@@ -121,14 +205,44 @@ class SessionSetupDialog(QDialog):
         dir_layout = QVBoxLayout()
         dir_layout.setSpacing(6)
         dir_layout.addWidget(QLabel("Source Photo Directory:"))
-        
+
         dir_row = QHBoxLayout()
+        dir_row.setSpacing(10)
         self.source_dir_edit = QLineEdit()
-        self.source_dir_edit.setPlaceholderText("Select directory containing camera RAW or JPEG files...")
+        self.source_dir_edit.setFont(get_body_font(12))
+        self.source_dir_edit.setPlaceholderText("Select folder containing camera RAW or JPEG files...")
+        self.source_dir_edit.setMinimumHeight(38)
+        self.source_dir_edit.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 0 10px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
         dir_row.addWidget(self.source_dir_edit, stretch=1)
 
-        browse_btn = QPushButton("Browse Folder")
+        browse_btn = QPushButton("Browse Folder...")
+        browse_btn.setFont(get_body_font(12, bold=True))
         browse_btn.setIcon(render_icon("folder", 14, COLOR_TEXT_PRIMARY))
+        browse_btn.setMinimumHeight(38)
+        browse_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: #2A2E35;
+            }}
+        """)
         browse_btn.clicked.connect(self._browse_directory)
         dir_row.addWidget(browse_btn)
         dir_layout.addLayout(dir_row)
@@ -139,7 +253,7 @@ class SessionSetupDialog(QDialog):
         dir_layout.addWidget(self.scan_status_lbl)
 
         sec1_layout.addLayout(dir_layout)
-        form_layout.addWidget(sec1)
+        center_layout.addWidget(sec1)
 
         # Section 2: Format Selection
         sec2 = self._create_card()
@@ -171,7 +285,7 @@ class SessionSetupDialog(QDialog):
         sec2_layout.addWidget(self.rb_raw)
         sec2_layout.addWidget(self.rb_jpeg)
 
-        form_layout.addWidget(sec2)
+        center_layout.addWidget(sec2)
 
         # Section 3: Pair Synchronization
         self.sec3 = self._create_card()
@@ -197,7 +311,7 @@ class SessionSetupDialog(QDialog):
         sync_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
         sec3_layout.addWidget(sync_desc)
 
-        form_layout.addWidget(self.sec3)
+        center_layout.addWidget(self.sec3)
 
         # Section 4: RAM Budget & Preloading
         sec4 = self._create_card()
@@ -218,7 +332,7 @@ class SessionSetupDialog(QDialog):
         ram_expl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         sec4_layout.addWidget(ram_expl)
 
-        # Ram slider row
+        # RAM slider row
         slider_row = QHBoxLayout()
         slider_row.setSpacing(16)
 
@@ -245,14 +359,49 @@ class SessionSetupDialog(QDialog):
         self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
         sec4_layout.addWidget(self.batch_calc_lbl)
 
-        form_layout.addWidget(sec4)
+        center_layout.addWidget(sec4)
 
-        scroll.setWidget(container)
+        content_outer_layout.addStretch(1)
+        content_outer_layout.addWidget(center_container, stretch=6)
+        content_outer_layout.addStretch(1)
+
+        scroll.setWidget(scroll_content)
         main_layout.addWidget(scroll, stretch=1)
 
-        # Footer Buttons
-        footer_layout = QHBoxLayout()
-        footer_layout.setSpacing(12)
+        # 3. Fixed Bottom Action Bar
+        bottom_bar = QFrame()
+        bottom_bar.setObjectName("setupBottomBar")
+        bottom_bar.setStyleSheet(f"""
+            QFrame#setupBottomBar {{
+                background-color: {COLOR_BG_SURFACE};
+                border-top: 1px solid {COLOR_BORDER_DISTINCT};
+            }}
+        """)
+        bottom_layout = QHBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(24, 14, 24, 14)
+        bottom_layout.setSpacing(16)
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setFont(get_body_font(12))
+        self.btn_cancel.setMinimumHeight(40)
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 20px;
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                color: {COLOR_TEXT_SECONDARY};
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                border-color: {COLOR_TEXT_SECONDARY};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+        """)
+        self.btn_cancel.clicked.connect(self.cancelled.emit)
+        bottom_layout.addWidget(self.btn_cancel)
+
+        bottom_layout.addStretch()
 
         self.start_btn = QPushButton("Start Culling Session")
         self.start_btn.setObjectName("accentButton")
@@ -265,8 +414,8 @@ class SessionSetupDialog(QDialog):
                 font-weight: 700;
                 font-size: 13px;
                 border: 1px solid #F59E0B;
-                border-radius: 3px;
-                padding: 0 20px;
+                border-radius: 4px;
+                padding: 0 24px;
             }
             QPushButton:hover {
                 background-color: #F59E0B;
@@ -285,29 +434,9 @@ class SessionSetupDialog(QDialog):
         """)
         self.start_btn.setEnabled(False)
         self.start_btn.clicked.connect(self._start_session)
-        footer_layout.addWidget(self.start_btn, stretch=1)
+        bottom_layout.addWidget(self.start_btn)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFont(get_body_font(12))
-        cancel_btn.setMinimumHeight(40)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                padding: 0 18px;
-                background-color: transparent;
-                border: 1px solid {COLOR_BORDER_DISTINCT};
-                border-radius: 3px;
-                color: {COLOR_TEXT_SECONDARY};
-            }}
-            QPushButton:hover {{
-                color: {COLOR_TEXT_PRIMARY};
-                border-color: {COLOR_TEXT_SECONDARY};
-                background-color: {COLOR_BG_ELEVATED};
-            }}
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        footer_layout.addWidget(cancel_btn)
-
-        main_layout.addLayout(footer_layout)
+        main_layout.addWidget(bottom_bar)
 
     def _create_card(self) -> QFrame:
         frame = QFrame()
@@ -315,8 +444,8 @@ class SessionSetupDialog(QDialog):
             QFrame {{
                 background-color: {COLOR_BG_SURFACE};
                 border: 1px solid {COLOR_BORDER_DISTINCT};
-                border-radius: 2px;
-                padding: 12px;
+                border-radius: 4px;
+                padding: 16px;
             }}
         """)
         return frame
@@ -339,7 +468,6 @@ class SessionSetupDialog(QDialog):
         d = QFileDialog.getExistingDirectory(self, "Select Photo Directory")
         if d:
             self.source_dir_edit.setText(d)
-            # Default session name from directory name if untitled
             if self.name_edit.text() in ("Nordic Coastal Shoot", ""):
                 self.name_edit.setText(os.path.basename(d))
             self._rescan_items()
@@ -389,12 +517,11 @@ class SessionSetupDialog(QDialog):
             r_sz = os.path.getsize(r_path) if r_path else 0
             j_sz = os.path.getsize(j_path) if j_path else 0
 
-            # Determine primary display path
             if fmt_mode == "raw_only":
                 primary = r_path
             elif fmt_mode == "jpeg_only":
                 primary = j_path
-            else:  # both: prefer RAW for full raw inspection, or JPEG if raw missing
+            else:
                 primary = r_path if r_path else j_path
 
             item = PhotoItem(
@@ -419,7 +546,6 @@ class SessionSetupDialog(QDialog):
         self.scan_status_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT if count > 0 else COLOR_STATUS_REJECTED};")
         self.start_btn.setEnabled(count > 0)
 
-        # Calibrate default RAM preload: 50% of total session size, capped by global budget
         global_budget_mb = config.get("ram_budget_gb", 16) * 1024
         rec_ram_mb = max(512, min(int(total_mb * 0.5), global_budget_mb))
         self.ram_slider.setValue(rec_ram_mb)
@@ -430,15 +556,28 @@ class SessionSetupDialog(QDialog):
         self._update_batch_calc(val_mb)
 
     def _update_batch_calc(self, ram_mb: int):
-        # Average full-resolution uncompressed photo in RAM is ~60-80 MB
         avg_photo_mb = 75
         batch_size = max(4, min(32, int(ram_mb / avg_photo_mb)))
         self.calculated_batch_size = batch_size
         self.batch_calc_lbl.setText(
             f"Buffer holds: {batch_size} full-resolution photos in memory.\n"
-            f"Loads the first {batch_size} photos before starting. When you reach photo {batch_size}, "
+            f"Preloads the first {batch_size} photos before starting. When you reach photo {batch_size}, "
             f"Framed will pause to load the next {batch_size} photos with live speed and ETA."
         )
+
+    def reset_form(self):
+        """Reset form fields when opening a new session."""
+        self._populate_folders()
+        self.source_dir_edit.setText("")
+        self.scan_status_lbl.setText("No directory selected yet.")
+        self.scan_status_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        self.start_btn.setEnabled(False)
+        self.scanned_items = []
+        self.created_project = None
+        self.name_edit.setText("New Photo Shoot")
+        self.date_edit.setDate(QDate.currentDate())
+        self.rb_both.setChecked(True)
+        self._update_format_visibility()
 
     def _start_session(self):
         name = self.name_edit.text().strip()
@@ -464,4 +603,56 @@ class SessionSetupDialog(QDialog):
         )
         storage.save_project(project)
         self.created_project = project
+        self.session_created.emit(project.id)
+
+
+class SessionSetupDialog(QDialog):
+    """Dialog wrapper around SessionSetupView for standalone test compatibility."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New Culling Session — Configuration")
+        self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
+        self.setMinimumSize(600, 480)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.view = SessionSetupView(self)
+        # In dialog mode, hide top back button since dialog has window titlebar/cancel
+        self.view.btn_back.setVisible(False)
+        layout.addWidget(self.view)
+
+        self.view.session_created.connect(self._on_session_created)
+        self.view.cancelled.connect(self.reject)
+
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(840, max(600, avail.width() - 40))
+            target_h = min(740, max(480, avail.height() - 60))
+            self.resize(target_w, target_h)
+            x = avail.x() + (avail.width() - target_w) // 2
+            y = avail.y() + max(10, (avail.height() - target_h) // 2)
+            self.move(x, y)
+
+    def _on_session_created(self, project_id: str):
         self.accept()
+
+    @property
+    def created_project(self):
+        return self.view.created_project
+
+    @property
+    def scanned_items(self):
+        return self.view.scanned_items
+
+    @property
+    def total_bytes_scanned(self):
+        return self.view.total_bytes_scanned
+
+    def __getattr__(self, name):
+        return getattr(self.view, name)
