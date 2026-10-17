@@ -7,19 +7,20 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QScrollArea, QFrame, QInputDialog,
     QMessageBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
-    QLineEdit, QComboBox
+    QLineEdit, QComboBox, QMenu
 )
-from PySide6.QtCore import Qt, Signal, QDate, QSize
+from PySide6.QtCore import Qt, Signal, QDate, QSize, QPoint
 from PySide6.QtGui import QPainter, QColor
 from loupe.models import Folder, Project
 from loupe.storage import storage
 from loupe.config import config
 from loupe.ui.theme import (
-    COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BG_HOVER,
+    COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BG_HOVER, COLOR_BG_ACTIVE,
     COLOR_BORDER_SUBTLE, COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS,
     COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED,
     COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED,
-    get_display_font, get_body_font, get_mono_font
+    get_display_font, get_body_font, get_mono_font,
+    THEMES, current_theme_id, apply_theme, theme_manager
 )
 from loupe.ui.icons import render_icon
 
@@ -892,28 +893,9 @@ class ProjectCard(QFrame):
         icon_name = "arrow_right" if is_vid else "loupe"
 
         self.resume_btn = QPushButton(btn_text)
-        self.resume_btn.setIcon(render_icon(icon_name, 14, "#FFAE42"))
+        self.resume_btn.setObjectName("resumeCullButton")
+        self.resume_btn.setIcon(render_icon(icon_name, 14, COLOR_ACCENT))
         self.resume_btn.setMinimumHeight(36)
-        self.resume_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #2D2214;
-                color: #FFAE42;
-                border: 1px solid #E59533;
-                border-radius: 2px;
-                padding: 7px 16px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background-color: #E59533;
-                color: #FFFFFF;
-                border: 1px solid #FFAE42;
-            }}
-            QPushButton:pressed {{
-                background-color: #C87D20;
-                color: #FFFFFF;
-            }}
-        """)
         self.resume_btn.clicked.connect(lambda checked=False, pid=project.id: self.resume_clicked.emit(pid))
         actions_layout.addWidget(self.resume_btn)
 
@@ -1058,6 +1040,7 @@ class DashboardView(QWidget):
         self._init_ui()
         self.modal_overlay = DashboardModalOverlay(self)
         self.refresh()
+        theme_manager.theme_changed.connect(self._on_theme_changed)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1087,11 +1070,11 @@ class DashboardView(QWidget):
         brand_title = QLabel("FRAMED")
         brand_title.setFont(get_display_font(20, bold=True))
         brand_title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; letter-spacing: 2px;")
-        brand_sub = QLabel("PHOTOGRAPHER & VIDEOGRAPHER WORKSTATION")
-        brand_sub.setFont(get_mono_font(10, bold=True))
-        brand_sub.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
+        self.brand_sub = QLabel("PHOTOGRAPHER & VIDEOGRAPHER WORKSTATION")
+        self.brand_sub.setFont(get_mono_font(10, bold=True))
+        self.brand_sub.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
         brand_layout.addWidget(brand_title)
-        brand_layout.addWidget(brand_sub)
+        brand_layout.addWidget(self.brand_sub)
         header_layout.addLayout(brand_layout)
 
         # Mode Switcher (Photo Sort | Video Sort)
@@ -1127,28 +1110,15 @@ class DashboardView(QWidget):
         self.new_session_btn.setObjectName("accentButton")
         self.new_session_btn.setIcon(render_icon("plus", 14, "#FFFFFF"))
         self.new_session_btn.setMinimumHeight(36)
-        self.new_session_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #D97706;
-                color: #FFFFFF;
-                font-weight: 700;
-                font-size: 13px;
-                border: 1px solid #F59E0B;
-                border-radius: 3px;
-                padding: 6px 16px;
-            }
-            QPushButton:hover {
-                background-color: #F59E0B;
-                color: #FFFFFF;
-                border: 1px solid #FBBF24;
-            }
-            QPushButton:pressed {
-                background-color: #B45309;
-                color: #FFFFFF;
-            }
-        """)
         self.new_session_btn.clicked.connect(self.new_session_requested.emit)
         header_layout.addWidget(self.new_session_btn)
+
+        self.theme_btn = QPushButton("Theme")
+        self.theme_btn.setIcon(render_icon("palette", 14, COLOR_ACCENT))
+        self.theme_btn.setMinimumHeight(36)
+        self.theme_btn.setToolTip("Quick Switch Workstation Color Theme")
+        self.theme_btn.clicked.connect(self._open_theme_menu)
+        header_layout.addWidget(self.theme_btn)
 
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.setIcon(render_icon("settings", 14, COLOR_TEXT_PRIMARY))
@@ -1310,12 +1280,47 @@ class DashboardView(QWidget):
             self.media_mode_changed.emit(mode)
             self._load_projects_for_selection()
 
+    def _open_theme_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                padding: 6px;
+            }}
+            QMenu::item {{
+                padding: 6px 24px 6px 12px;
+                color: {COLOR_TEXT_PRIMARY};
+                font-size: 12px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_ACCENT};
+            }}
+        """)
+        for t_id, t_def in THEMES.items():
+            prefix = "✓  " if t_id == current_theme_id else "     "
+            action = menu.addAction(f"{prefix}{t_def.name}")
+            action.triggered.connect(lambda checked=False, tid=t_id: self._set_quick_theme(tid))
+        menu.exec(self.theme_btn.mapToGlobal(QPoint(0, self.theme_btn.height() + 2)))
+
+    def _set_quick_theme(self, theme_id: str):
+        apply_theme(theme_id)
+
+    def _on_theme_changed(self, theme_id: str):
+        if hasattr(self, "theme_btn"):
+            self.theme_btn.setIcon(render_icon("palette", 14, COLOR_ACCENT))
+        if hasattr(self, "brand_sub"):
+            self.brand_sub.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
+        self._update_mode_switcher_styles()
+        self.refresh()
+
     def _update_mode_switcher_styles(self):
         active_style = f"""
             QPushButton {{
-                background-color: #2D2214;
-                color: #FFAE42;
-                border: 1px solid #E59533;
+                background-color: {COLOR_BG_ACTIVE};
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT};
                 border-radius: 3px;
                 padding: 6px 14px;
                 font-weight: 700;

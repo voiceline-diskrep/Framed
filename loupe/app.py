@@ -10,7 +10,10 @@ from PySide6.QtGui import QIcon
 
 from loupe.config import config
 from loupe.storage import storage
-from loupe.ui.theme import load_application_fonts, get_application_stylesheet, setup_dark_palette
+from loupe.ui.theme import (
+    load_application_fonts, get_application_stylesheet, setup_palette,
+    apply_theme, theme_manager, COLOR_ACCENT
+)
 from loupe.ui.icons import render_icon
 from loupe.ui.dashboard_view import DashboardView
 from loupe.ui.review_view import ReviewView
@@ -30,8 +33,8 @@ class FramedMainWindow(QMainWindow):
         self.setMinimumSize(960, 640)
 
         # Set application window icon
-        app_icon = render_icon("loupe", 32, "#E59533")
-        self.setWindowIcon(app_icon)
+        self.setWindowIcon(render_icon("loupe", 32, COLOR_ACCENT))
+        theme_manager.theme_changed.connect(self._on_theme_changed)
 
         # Stacked central container
         self.stack = QStackedWidget(self)
@@ -154,6 +157,10 @@ class FramedMainWindow(QMainWindow):
         tour.exec()
 
 
+    def _on_theme_changed(self, theme_id: str):
+        from loupe.ui.theme import COLOR_ACCENT
+        self.setWindowIcon(render_icon("loupe", 32, COLOR_ACCENT))
+
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showMaximized()
@@ -176,11 +183,11 @@ def create_app() -> QApplication:
     if not app:
         app = QApplication(sys.argv)
     
-    # Enforce dark palette so Windows light theme cannot force black text
-    setup_dark_palette(app)
+    # Load and apply active or saved theme
+    saved_theme = config.get("theme", "dark_amber")
+    apply_theme(saved_theme, app)
     # Load fonts & theme stylesheet
     load_application_fonts()
-    app.setStyleSheet(get_application_stylesheet())
     return app
 
 

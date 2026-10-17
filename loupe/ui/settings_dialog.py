@@ -4,7 +4,7 @@ import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QCheckBox, QSlider, QFrame, QFileDialog, QMessageBox, QWidget, QScrollArea,
-    QApplication
+    QApplication, QRadioButton, QButtonGroup, QGridLayout
 )
 from PySide6.QtCore import Qt, Signal
 from loupe.config import config, get_total_system_ram_gb
@@ -12,7 +12,8 @@ from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS, COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED, COLOR_ACCENT,
-    get_display_font, get_body_font, get_mono_font
+    get_display_font, get_body_font, get_mono_font,
+    THEMES, THEME_ALIASES, current_theme_id, apply_theme
 )
 from loupe.ui.icons import render_icon
 from loupe.core.updater import CURRENT_VERSION, UpdateCheckWorker
@@ -105,7 +106,75 @@ class SettingsDialog(QDialog):
         form_layout.setContentsMargins(0, 4, 0, 4)
         form_layout.setSpacing(16)
 
-        # Section 1: RAM Budget
+        # Section 1: Workspace Theme & Appearance
+        card_theme = self._create_card()
+        l_theme = QVBoxLayout(card_theme)
+        l_theme.setSpacing(10)
+
+        t_theme = QLabel("WORKSPACE THEME & APPEARANCE")
+        t_theme.setFont(get_mono_font(10, bold=True))
+        t_theme.setStyleSheet(f"color: {COLOR_ACCENT};")
+        l_theme.addWidget(t_theme)
+
+        desc_theme = QLabel("Select your reference color grade theme. Visual styles update live in real-time.")
+        desc_theme.setFont(get_body_font(12))
+        desc_theme.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        l_theme.addWidget(desc_theme)
+
+        self.theme_group = QButtonGroup(self)
+        self.theme_radios = {}
+
+        grid_theme = QGridLayout()
+        grid_theme.setSpacing(10)
+
+        for idx, (t_id, t_def) in enumerate(THEMES.items()):
+            row = idx // 2
+            col = idx % 2
+
+            t_box = QFrame()
+            t_box.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {COLOR_BG_BASE};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 4px;
+                }}
+            """)
+            box_layout = QVBoxLayout(t_box)
+            box_layout.setContentsMargins(10, 8, 10, 8)
+            box_layout.setSpacing(4)
+
+            top_row = QHBoxLayout()
+            rb = QRadioButton(t_def.name)
+            rb.setFont(get_body_font(12, bold=True))
+            self.theme_group.addButton(rb)
+            self.theme_radios[t_id] = rb
+            top_row.addWidget(rb, stretch=1)
+
+            # Swatches (Base, Surface, Accent)
+            swatch_layout = QHBoxLayout()
+            swatch_layout.setSpacing(4)
+            for c_key in ["COLOR_BG_BASE", "COLOR_BG_SURFACE", "COLOR_ACCENT"]:
+                c_val = t_def.colors[c_key]
+                dot = QLabel()
+                dot.setFixedSize(14, 14)
+                dot.setStyleSheet(f"background-color: {c_val}; border: 1px solid rgba(128,128,128,0.4); border-radius: 7px;")
+                swatch_layout.addWidget(dot)
+            top_row.addLayout(swatch_layout)
+            box_layout.addLayout(top_row)
+
+            lbl_desc = QLabel(t_def.description)
+            lbl_desc.setFont(get_body_font(11))
+            lbl_desc.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+            lbl_desc.setWordWrap(True)
+            box_layout.addWidget(lbl_desc)
+
+            rb.toggled.connect(lambda checked, tid=t_id: self._on_theme_toggled(tid, checked))
+            grid_theme.addWidget(t_box, row, col)
+
+        l_theme.addLayout(grid_theme)
+        form_layout.addWidget(card_theme)
+
+        # Section 2: RAM Budget
         card_ram = self._create_card()
         l_ram = QVBoxLayout(card_ram)
         l_ram.setSpacing(10)
@@ -335,7 +404,16 @@ class SettingsDialog(QDialog):
         parent_layout.addLayout(row)
         return edit
 
+    def _on_theme_toggled(self, theme_id: str, checked: bool):
+        if checked:
+            apply_theme(theme_id)
+
     def _load_values(self):
+        saved_theme = config.get("theme", "dark_amber")
+        saved_theme = THEME_ALIASES.get(saved_theme, saved_theme)
+        if saved_theme in self.theme_radios:
+            self.theme_radios[saved_theme].setChecked(True)
+
         ram_gb = config.get("ram_budget_gb", 16)
         self.ram_slider.setValue(ram_gb)
         self.ram_val_lbl.setText(f"{ram_gb} GB")
@@ -363,6 +441,7 @@ class SettingsDialog(QDialog):
             self.edit_export_dir.setText(d)
 
     def _save_values(self):
+        config.set("theme", current_theme_id)
         config.set("ram_budget_gb", self.ram_slider.value())
         config.set_key_binding("keep", self.key_keep.text().strip() or "W")
         config.set_key_binding("maybe", self.key_maybe.text().strip() or "E")
@@ -415,6 +494,7 @@ class SettingsDialog(QDialog):
         )
         if confirm == QMessageBox.Yes:
             config.reset_to_defaults()
+            apply_theme("dark_amber")
             self._load_values()
 
     def _on_restart_tour(self):

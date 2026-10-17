@@ -648,6 +648,104 @@ class TestLoupeWorkstation(unittest.TestCase):
         review.preload_manager.cleanup()
 
 
+    def test_multi_theme_engine_and_ui(self):
+        """Verify dynamic multi-theme engine, 6 workstation palettes, Settings radio swatches, and dashboard quick switch."""
+        from loupe.ui.theme import (
+            THEMES, current_theme_id, apply_theme, is_current_theme_light,
+            theme_manager, get_application_stylesheet, COLOR_ACCENT, COLOR_BG_BASE
+        )
+        from loupe.ui.settings_dialog import SettingsDialog
+        from loupe.ui.dashboard_view import DashboardView
+
+        # 1. Verify 6 clean, descriptive themes exist in registry
+        expected_themes = [
+            "dark_amber", "oled", "dark_blue",
+            "dark_green", "neutral_gray", "light"
+        ]
+        for tid in expected_themes:
+            self.assertIn(tid, THEMES)
+            tdef = THEMES[tid]
+            self.assertTrue(len(tdef.name) > 0)
+            self.assertTrue(len(tdef.description) > 0)
+            self.assertIn("COLOR_BG_BASE", tdef.colors)
+            self.assertIn("COLOR_BG_SURFACE", tdef.colors)
+            self.assertIn("COLOR_ACCENT", tdef.colors)
+            self.assertIn("COLOR_STATUS_KEPT", tdef.colors)
+            self.assertIn("COLOR_STATUS_REJECTED", tdef.colors)
+            self.assertIn("COLOR_STATUS_MAYBE", tdef.colors)
+
+        # Check plain names
+        self.assertEqual(THEMES["dark_amber"].name, "Dark Amber")
+        self.assertEqual(THEMES["oled"].name, "OLED")
+        self.assertEqual(THEMES["dark_blue"].name, "Dark Blue")
+        self.assertEqual(THEMES["dark_green"].name, "Dark Green")
+        self.assertEqual(THEMES["neutral_gray"].name, "Neutral Gray")
+        self.assertEqual(THEMES["light"].name, "Light")
+
+        self.assertFalse(THEMES["dark_amber"].is_light)
+        self.assertTrue(THEMES["light"].is_light)
+
+        # 2. Test live theme application and signal notification
+        emitted_themes = []
+        theme_manager.theme_changed.connect(lambda t: emitted_themes.append(t))
+
+        # Switch to OLED (also test legacy alias 'obsidian_cyan')
+        apply_theme("oled")
+        from loupe.ui.theme import COLOR_ACCENT as cyan_accent, current_theme_id as oled_id
+        self.assertEqual(oled_id, "oled")
+        self.assertEqual(cyan_accent, "#06B6D4")
+        self.assertEqual(config.get("theme"), "oled")
+        self.assertFalse(is_current_theme_light())
+        self.assertIn("oled", emitted_themes)
+
+        # Test legacy alias obsidian_cyan maps to oled
+        apply_theme("obsidian_cyan")
+        from loupe.ui.theme import current_theme_id as alias_oled_id
+        self.assertEqual(alias_oled_id, "oled")
+
+        # Switch to Light
+        apply_theme("light")
+        from loupe.ui.theme import COLOR_ACCENT as light_accent, COLOR_BG_BASE as light_bg
+        self.assertTrue(is_current_theme_light())
+        self.assertEqual(light_accent, "#2563EB")
+        self.assertEqual(light_bg, "#F3F4F6")
+        self.assertIn("light", emitted_themes)
+
+        # Verify stylesheet renders correctly for light theme
+        ss_light = get_application_stylesheet()
+        self.assertIn("#2563EB", ss_light)
+        self.assertIn("#F3F4F6", ss_light)
+
+        # Switch to Dark Green
+        apply_theme("dark_green")
+        from loupe.ui.theme import COLOR_ACCENT as emerald_accent
+        self.assertEqual(emerald_accent, "#10B981")
+
+        # 3. Test SettingsDialog UI with theme radios
+        dlg = SettingsDialog()
+        self.assertEqual(len(dlg.theme_radios), 6)
+        self.assertTrue(dlg.theme_radios["dark_green"].isChecked())
+        
+        # Toggle Neutral Gray via radio
+        dlg.theme_radios["neutral_gray"].setChecked(True)
+        from loupe.ui.theme import current_theme_id as gray_id, COLOR_ACCENT as gray_accent
+        self.assertEqual(gray_id, "neutral_gray")
+        self.assertEqual(gray_accent, "#F97316")
+
+        # 4. Test Dashboard quick switch button & menu action
+        dash = DashboardView()
+        self.assertTrue(hasattr(dash, "theme_btn"))
+        dash._set_quick_theme("dark_blue")
+        from loupe.ui.theme import current_theme_id as blue_id, COLOR_ACCENT as blue_accent
+        self.assertEqual(blue_id, "dark_blue")
+        self.assertEqual(blue_accent, "#6366F1")
+
+        # Restore default Dark Amber
+        apply_theme("dark_amber")
+        from loupe.ui.theme import current_theme_id as amber_id
+        self.assertEqual(amber_id, "dark_amber")
+
+
 if __name__ == "__main__":
     unittest.main()
 

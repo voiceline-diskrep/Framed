@@ -146,6 +146,17 @@ def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
         path.lineTo(pad, pad + s * 0.4)
         painter.drawPath(path)
 
+    elif name in ("theme", "palette"):
+        rect = QRectF(pad, pad, s - pad * 2, s - pad * 2)
+        painter.drawEllipse(rect)
+        # Thumb hole
+        painter.drawEllipse(QPointF(s * 0.65, s * 0.65), s * 0.1, s * 0.1)
+        # Color spots
+        painter.setBrush(QBrush(color))
+        painter.drawEllipse(QPointF(s * 0.35, s * 0.35), 1.5, 1.5)
+        painter.drawEllipse(QPointF(s * 0.55, s * 0.28), 1.5, 1.5)
+        painter.drawEllipse(QPointF(s * 0.72, s * 0.40), 1.5, 1.5)
+
     else:
         # Default dot
         painter.drawEllipse(QPointF(s / 2, s / 2), 2, 2)
