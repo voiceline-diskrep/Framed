@@ -99,7 +99,7 @@ class SessionSetupDialog(QDialog):
 
         # Folder
         v2 = QVBoxLayout()
-        v2.addWidget(QLabel("Folder:"))
+        v2.addWidget(QLabel("Workspace Folder:"))
         self.folder_combo = QComboBox()
         self._populate_folders()
         v2.addWidget(self.folder_combo)

@@ -4,7 +4,7 @@ import os
 import subprocess
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QProgressBar, QFrame, QFileDialog, QMessageBox
+    QProgressBar, QFrame, QFileDialog, QMessageBox, QCheckBox
 )
 from PySide6.QtCore import Qt
 from loupe.config import config
@@ -64,6 +64,34 @@ class ExportDialog(QDialog):
         header.addWidget(sub)
         main_layout.addLayout(header)
 
+        # Destination Folder Input
+        dest_layout = QVBoxLayout()
+        dest_layout.setSpacing(8)
+        dest_lbl = QLabel("Export Destination:")
+        dest_lbl.setFont(get_body_font(12, bold=True))
+        dest_layout.addWidget(dest_lbl)
+
+        row_dest = QHBoxLayout()
+        self.dest_edit = QLineEdit()
+        default_dir = config.get("default_export_dir", "") or os.path.join(os.path.expanduser("~"), "Pictures", "Framed Exports")
+        self.dest_edit.setText(default_dir)
+        row_dest.addWidget(self.dest_edit, stretch=1)
+
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._browse_dest)
+        row_dest.addWidget(browse_btn)
+        dest_layout.addLayout(row_dest)
+
+        # Workspace Folder Separation Checkbox
+        ws_name = self.project.get_workspace_name()
+        self.cb_workspace = QCheckBox(f"Separate into Workspace Folder ('{ws_name}')")
+        self.cb_workspace.setFont(get_body_font(12))
+        self.cb_workspace.setChecked(config.get("export_separate_by_workspace", True))
+        self.cb_workspace.toggled.connect(self._on_workspace_toggled)
+        dest_layout.addWidget(self.cb_workspace)
+
+        main_layout.addLayout(dest_layout)
+
         # Structure Preview Card
         struct_card = QFrame()
         struct_card.setStyleSheet(f"""
@@ -82,49 +110,13 @@ class ExportDialog(QDialog):
         t_struct.setStyleSheet(f"color: {COLOR_ACCENT};")
         struct_layout.addWidget(t_struct)
 
-        p_name = sanitize_folder_name(self.project.name)
-        lines = [
-            f"📁 {p_name}/",
-            f"   ├── 📁 Selected/     ({self.project.kept_count} photos)",
-            f"   │    ├── 📁 RAW/",
-            f"   │    └── 📁 JPEG/",
-        ]
-        if self.project.maybe_count > 0:
-            lines.extend([
-                f"   ├── 📁 Maybe/        ({self.project.maybe_count} photos)",
-                f"   │    ├── 📁 RAW/",
-                f"   │    └── 📁 JPEG/",
-            ])
-        lines.extend([
-            f"   └── 📁 Unselected/   ({self.project.rejected_count + self.project.pending_count} photos)",
-            f"        ├── 📁 RAW/",
-            f"        └── 📁 JPEG/",
-        ])
-        preview_text = "\n".join(lines)
-        preview_lbl = QLabel(preview_text)
-        preview_lbl.setFont(get_mono_font(11))
-        preview_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
-        struct_layout.addWidget(preview_lbl)
+        self.preview_lbl = QLabel("")
+        self.preview_lbl.setFont(get_mono_font(11))
+        self.preview_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
+        struct_layout.addWidget(self.preview_lbl)
         main_layout.addWidget(struct_card)
 
-        # Destination Folder Input
-        dest_layout = QVBoxLayout()
-        dest_layout.setSpacing(6)
-        dest_lbl = QLabel("Export Destination:")
-        dest_lbl.setFont(get_body_font(12, bold=True))
-        dest_layout.addWidget(dest_lbl)
-
-        row_dest = QHBoxLayout()
-        self.dest_edit = QLineEdit()
-        default_dir = config.get("default_export_dir", "") or os.path.join(os.path.expanduser("~"), "Pictures", "Loupe Exports")
-        self.dest_edit.setText(default_dir)
-        row_dest.addWidget(self.dest_edit, stretch=1)
-
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self._browse_dest)
-        row_dest.addWidget(browse_btn)
-        dest_layout.addLayout(row_dest)
-        main_layout.addLayout(dest_layout)
+        self._update_hierarchy_preview()
 
         # Progress / Status Frame
         self.status_frame = QFrame()
@@ -181,6 +173,44 @@ class ExportDialog(QDialog):
         if d:
             self.dest_edit.setText(d)
 
+    def _on_workspace_toggled(self, checked: bool):
+        config.set("export_separate_by_workspace", checked)
+        self._update_hierarchy_preview()
+
+    def _update_hierarchy_preview(self):
+        p_name = sanitize_folder_name(self.project.name)
+        use_ws = self.cb_workspace.isChecked()
+        w_name = sanitize_folder_name(self.project.get_workspace_name())
+
+        lines = []
+        if use_ws:
+            lines.append(f"📁 {w_name}/")
+            lines.append(f"   └── 📁 {p_name}/")
+            indent = "        "
+        else:
+            lines.append(f"📁 {p_name}/")
+            indent = "   "
+
+        lines.extend([
+            f"{indent}├── 📁 Selected/     ({self.project.kept_count} photos)",
+            f"{indent}│    ├── 📁 RAW/",
+            f"{indent}│    └── 📁 JPEG/",
+        ])
+        if self.project.maybe_count > 0:
+            lines.extend([
+                f"{indent}├── 📁 Maybe/        ({self.project.maybe_count} photos)",
+                f"{indent}│    ├── 📁 RAW/",
+                f"{indent}│    └── 📁 JPEG/",
+            ])
+        lines.extend([
+            f"{indent}└── 📁 Unselected/   ({self.project.rejected_count + self.project.pending_count} photos)",
+            f"{indent}     ├── 📁 RAW/",
+            f"{indent}     └── 📁 JPEG/",
+        ])
+        if self.project.edited_count > 0:
+            lines.append(f"{indent}└── 📁 edited result/ ({self.project.edited_count} photos)")
+        self.preview_lbl.setText("\n".join(lines))
+
     def _start_export(self):
         dest_root = self.dest_edit.text().strip()
         if not dest_root:
@@ -191,7 +221,8 @@ class ExportDialog(QDialog):
         self.dest_edit.setEnabled(False)
         self.cancel_btn.setText("Cancel Copy")
 
-        self.worker = ExportWorker(self.project, dest_root, self)
+        use_ws = self.cb_workspace.isChecked()
+        self.worker = ExportWorker(self.project, dest_root, separate_by_workspace=use_ws, parent=self)
         self.worker.progress_update.connect(self._on_progress)
         self.worker.export_finished.connect(self._on_finished)
         self.worker.export_failed.connect(self._on_failed)

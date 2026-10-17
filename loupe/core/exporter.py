@@ -18,10 +18,11 @@ class ExportWorker(QThread):
     export_finished = Signal(dict)                  # summary_dict
     export_failed = Signal(str)                     # error_message
 
-    def __init__(self, project: Project, destination_root: str, parent=None):
+    def __init__(self, project: Project, destination_root: str, separate_by_workspace: bool = True, parent=None):
         super().__init__(parent)
         self.project = project
         self.destination_root = destination_root
+        self.separate_by_workspace = separate_by_workspace
         self._is_cancelled = False
 
     def cancel(self):
@@ -30,7 +31,11 @@ class ExportWorker(QThread):
     def run(self):
         try:
             proj_folder_name = sanitize_folder_name(self.project.name)
-            base_dir = os.path.join(self.destination_root, proj_folder_name)
+            if self.separate_by_workspace:
+                ws_name = sanitize_folder_name(self.project.get_workspace_name())
+                base_dir = os.path.join(self.destination_root, ws_name, proj_folder_name)
+            else:
+                base_dir = os.path.join(self.destination_root, proj_folder_name)
             
             selected_raw = os.path.join(base_dir, "Selected", "RAW")
             selected_jpeg = os.path.join(base_dir, "Selected", "JPEG")
@@ -56,6 +61,21 @@ class ExportWorker(QThread):
                     tasks.append((item.raw_path, target_raw_dir))
                 if item.jpeg_path and os.path.exists(item.jpeg_path):
                     tasks.append((item.jpeg_path, target_jpeg_dir))
+
+            # Include any 'edited result' Lightroom photos if present
+            edited_dest_dir = os.path.join(base_dir, "edited result")
+            if self.project.edited_files:
+                for ef in self.project.edited_files:
+                    if ef and os.path.exists(ef):
+                        tasks.append((ef, edited_dest_dir))
+            elif self.project.edited_result_dir and os.path.exists(self.project.edited_result_dir):
+                try:
+                    for f in os.listdir(self.project.edited_result_dir):
+                        fp = os.path.join(self.project.edited_result_dir, f)
+                        if os.path.isfile(fp):
+                            tasks.append((fp, edited_dest_dir))
+                except Exception:
+                    pass
 
             total_files = len(tasks)
             if total_files == 0:

@@ -4,11 +4,12 @@ import os
 import subprocess
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QFileDialog, QProgressBar, QMessageBox, QFrame
+    QLineEdit, QFileDialog, QProgressBar, QMessageBox, QFrame, QCheckBox
 )
 from PySide6.QtCore import Qt
 from loupe.models import Project
 from loupe.config import config
+from loupe.core.exporter import sanitize_folder_name
 from loupe.core.video_exporter import VideoExportWorker
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_DISTINCT,
@@ -154,7 +155,42 @@ class VideoExportDialog(QDialog):
         btn_browse.clicked.connect(self._browse)
         row_dest.addWidget(btn_browse)
         dir_layout.addLayout(row_dest)
+
+        # Workspace Folder Separation Checkbox
+        ws_name = self.project.get_workspace_name()
+        self.cb_workspace = QCheckBox(f"Separate into Workspace Folder ('{ws_name}')")
+        self.cb_workspace.setFont(get_body_font(12))
+        self.cb_workspace.setChecked(config.get("export_separate_by_workspace", True))
+        self.cb_workspace.toggled.connect(self._on_workspace_toggled)
+        dir_layout.addWidget(self.cb_workspace)
+
         layout.addLayout(dir_layout)
+
+        # Structure Preview Card
+        struct_card = QFrame()
+        struct_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 12px;
+            }}
+        """)
+        struct_layout = QVBoxLayout(struct_card)
+        struct_layout.setSpacing(6)
+
+        t_struct = QLabel("EXPORT DIRECTORY HIERARCHY")
+        t_struct.setFont(get_mono_font(10, bold=True))
+        t_struct.setStyleSheet(f"color: {COLOR_ACCENT};")
+        struct_layout.addWidget(t_struct)
+
+        self.preview_lbl = QLabel("")
+        self.preview_lbl.setFont(get_mono_font(11))
+        self.preview_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
+        struct_layout.addWidget(self.preview_lbl)
+        layout.addWidget(struct_card)
+
+        self._update_hierarchy_preview()
 
         # Progress bar
         self.progress_frame = QFrame()
@@ -216,6 +252,32 @@ class VideoExportDialog(QDialog):
         d = QFileDialog.getExistingDirectory(self, "Select Export Destination", self.edit_dir.text())
         if d:
             self.edit_dir.setText(d)
+            self._update_hierarchy_preview()
+
+    def _on_workspace_toggled(self, checked: bool):
+        config.set("export_separate_by_workspace", checked)
+        self._update_hierarchy_preview()
+
+    def _update_hierarchy_preview(self):
+        p_name = sanitize_folder_name(self.project.name)
+        use_ws = self.cb_workspace.isChecked()
+        w_name = sanitize_folder_name(self.project.get_workspace_name())
+
+        lines = []
+        if use_ws:
+            lines.append(f"📁 {w_name}/")
+            lines.append(f"   └── 📁 {p_name}/")
+            indent = "        "
+        else:
+            lines.append(f"📁 {p_name}/")
+            indent = "   "
+
+        lines.extend([
+            f"{indent}├── 📁 Selected/     ({self.project.selected_count} clips)",
+            f"{indent}├── 📁 Similar/      ({self.project.similar_count} clips)",
+            f"{indent}└── 📁 Unselected/   ({self.project.unselected_count} clips)",
+        ])
+        self.preview_lbl.setText("\n".join(lines))
 
     def _start_export(self):
         root = self.edit_dir.text().strip()
@@ -227,7 +289,8 @@ class VideoExportDialog(QDialog):
         self.btn_cancel.setEnabled(False)
         self.progress_frame.setVisible(True)
 
-        self.worker = VideoExportWorker(self.project, root, self)
+        use_ws = self.cb_workspace.isChecked()
+        self.worker = VideoExportWorker(self.project, root, separate_by_workspace=use_ws, parent=self)
         self.worker.progress_changed.connect(self._on_progress)
         self.worker.export_finished.connect(self._on_finished)
         self.worker.error_occurred.connect(self._on_error)

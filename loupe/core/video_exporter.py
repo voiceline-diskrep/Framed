@@ -14,10 +14,11 @@ class VideoExportWorker(QThread):
     export_finished = Signal(dict)                  # summary dictionary
     error_occurred = Signal(str)
 
-    def __init__(self, project: Project, destination_root: str, parent=None):
+    def __init__(self, project: Project, destination_root: str, separate_by_workspace: bool = True, parent=None):
         super().__init__(parent)
         self.project = project
         self.dest_root = destination_root
+        self.separate_by_workspace = separate_by_workspace
         self._is_cancelled = False
 
     def cancel(self):
@@ -26,7 +27,11 @@ class VideoExportWorker(QThread):
     def run(self):
         try:
             folder_name = sanitize_folder_name(self.project.name)
-            base_dir = os.path.join(self.dest_root, folder_name)
+            if self.separate_by_workspace:
+                ws_name = sanitize_folder_name(self.project.get_workspace_name())
+                base_dir = os.path.join(self.dest_root, ws_name, folder_name)
+            else:
+                base_dir = os.path.join(self.dest_root, folder_name)
 
             selected_dir = os.path.join(base_dir, "Selected")
             unselected_dir = os.path.join(base_dir, "Unselected")

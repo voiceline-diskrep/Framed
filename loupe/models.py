@@ -135,6 +135,25 @@ class Project:
         term = "sorted" if self.media_type == "video" else "culled"
         return f"In Progress ({culled}/{len(self.items)} {term})"
 
+    def get_workspace_name(self) -> str:
+        """Returns the human-readable name of the workspace folder this project belongs to."""
+        try:
+            from loupe.storage import storage
+            if self.folder_id:
+                folder = storage.get_folder_by_id(self.folder_id)
+                if folder and folder.name.strip():
+                    return folder.name.strip()
+            # If not assigned or not found, prefer "Personal"
+            all_folders = storage.get_folders()
+            for f in all_folders:
+                if f.name.strip().lower() == "personal":
+                    return f.name.strip()
+            if all_folders:
+                return all_folders[0].name.strip()
+        except Exception:
+            pass
+        return "Personal"
+
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["items"] = [item.to_dict() for item in self.items]

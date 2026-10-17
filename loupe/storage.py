@@ -55,7 +55,13 @@ class StorageManager:
         return sorted(list(self.folders.values()), key=lambda f: f.name.lower())
 
     def get_folder_by_id(self, folder_id: str) -> Optional[Folder]:
-        return self.folders.get(folder_id)
+        if not folder_id:
+            return None
+        f = self.folders.get(folder_id)
+        if not f and os.path.exists(self.db_path):
+            self.load()
+            f = self.folders.get(folder_id)
+        return f
 
     def create_folder(self, name: str) -> Folder:
         folder = Folder(name=name.strip())

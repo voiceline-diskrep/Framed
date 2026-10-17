@@ -19,11 +19,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "zoom_start_level": 2.0,  # 200% zoom
     "default_sync_pairs": True,
     "default_export_dir": "",
+    "export_separate_by_workspace": True,
     "has_completed_tour": False,
     "theme_mode": "dark",
     "auto_check_updates": True,
     "update_manifest_url": "https://api.github.com/repos/voiceline-diskrep/Framed/releases/latest",
-    "app_version": "1.1.4",
+    "app_version": "1.1.5",
 }
 
 def get_app_dir() -> str:

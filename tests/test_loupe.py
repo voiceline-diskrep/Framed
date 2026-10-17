@@ -427,5 +427,49 @@ class TestLoupeWorkstation(unittest.TestCase):
         self.assertEqual(dash.current_media_mode, "photo")
         self.assertIn("Photo", dash.new_session_btn.text())
 
+    def test_workspace_folder_export_separation(self):
+        """Verify export into separate workspace folder when separate_by_workspace is True vs False."""
+        sm = StorageManager()
+        ws_folder = sm.create_folder("Fashion & Editorial")
+        self.assertIsNotNone(ws_folder)
+
+        try:
+            # Create sample photo
+            j_path = os.path.join(self.sample_shoot_dir, "DSC08491.JPG")
+            r_path = os.path.join(self.sample_shoot_dir, "DSC08491.ARW")
+            item = PhotoItem(base_name="DSC08491", raw_path=r_path, jpeg_path=j_path, primary_path=j_path, status="kept")
+
+            proj = Project(name="Spring Collection 2026", folder_id=ws_folder.id, items=[item])
+            sm.save_project(proj)
+
+            # Test 1: separate_by_workspace=True (default)
+            dest1 = os.path.join(self.temp_dir, "export_ws_true")
+            worker1 = ExportWorker(proj, dest1, separate_by_workspace=True)
+            res1 = []
+            worker1.export_finished.connect(lambda r: res1.append(r))
+            worker1.run()
+
+            self.assertEqual(len(res1), 1)
+            expected_base1 = os.path.join(dest1, "Fashion & Editorial", "Spring Collection 2026")
+            self.assertEqual(res1[0]["base_dir"], expected_base1)
+            self.assertTrue(os.path.exists(os.path.join(expected_base1, "Selected", "JPEG", "DSC08491.JPG")))
+
+            # Test 2: separate_by_workspace=False
+            dest2 = os.path.join(self.temp_dir, "export_ws_false")
+            worker2 = ExportWorker(proj, dest2, separate_by_workspace=False)
+            res2 = []
+            worker2.export_finished.connect(lambda r: res2.append(r))
+            worker2.run()
+
+            self.assertEqual(len(res2), 1)
+            expected_base2 = os.path.join(dest2, "Spring Collection 2026")
+            self.assertEqual(res2[0]["base_dir"], expected_base2)
+            self.assertTrue(os.path.exists(os.path.join(expected_base2, "Selected", "JPEG", "DSC08491.JPG")))
+
+        finally:
+            sm.delete_project(proj.id)
+            sm.delete_folder(ws_folder.id)
+
 if __name__ == "__main__":
     unittest.main()
+
