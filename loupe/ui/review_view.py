@@ -333,9 +333,19 @@ class ReviewView(QWidget):
 
         # Initialize preloader
         start_idx = max(0, min(project.current_index, len(project.items) - 1)) if project.items else 0
-        self.preload_manager.initialize_session(project.items, project.batch_size, start_idx)
+        ram_mb = getattr(project, "ram_allocation_mb", 2048) or 2048
+        calc_from_ram = max(4, int(ram_mb / 75))
+        effective_batch_size = max(getattr(project, "batch_size", 16), calc_from_ram)
+        project.batch_size = effective_batch_size
 
-        # Initial preload batch (e.g. first 16 photos)
+        self.preload_manager.initialize_session(
+            project.items,
+            effective_batch_size,
+            start_idx,
+            ram_allocation_mb=ram_mb
+        )
+
+        # Initial preload batch
         if project.items:
             batch_id = start_idx // project.batch_size
             b_start = batch_id * project.batch_size
@@ -344,7 +354,7 @@ class ReviewView(QWidget):
             # Show pause overlay for initial load
             self.is_preloading_paused = True
             self.target_nav_index = start_idx
-            self.preload_overlay.set_batch_info(b_start, b_end, start_idx)
+            self.preload_overlay.set_batch_info(b_start, b_end, start_idx, total_items=len(project.items))
             self.preload_overlay.show()
             self.preload_manager.request_batch(batch_id, list(range(b_start, b_end + 1)))
         else:
@@ -463,7 +473,7 @@ class ReviewView(QWidget):
         if needs_pause:
             self.is_preloading_paused = True
             self.target_nav_index = target_idx
-            self.preload_overlay.set_batch_info(b_start, b_end, target_idx)
+            self.preload_overlay.set_batch_info(b_start, b_end, target_idx, total_items=len(self.project.items))
             self.preload_overlay.show()
         else:
             self._display_current_photo()

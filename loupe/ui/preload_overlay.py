@@ -1,5 +1,4 @@
-"""Preloading pause overlay showing batch progress, live transfer speed (MB/s), and ETA."""
-
+from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QFrame, QPushButton
 )
@@ -110,11 +109,18 @@ class PreloadOverlay(QWidget):
         layout.addWidget(telemetry_frame)
         outer_layout.addWidget(self.card)
 
-    def set_batch_info(self, start_idx: int, end_idx: int, target_idx: int):
-        self.title_lbl.setText("Decoded Cache Limit Reached")
-        self.subtitle_lbl.setText(
-            f"Navigated to photo {target_idx + 1}. Loading photos {start_idx + 1} to {end_idx + 1} into memory..."
-        )
+    def set_batch_info(self, start_idx: int, end_idx: int, target_idx: int, total_items: Optional[int] = None):
+        count = end_idx - start_idx + 1
+        if total_items and start_idx == 0 and end_idx >= total_items - 1:
+            self.title_lbl.setText("Preloading Entire Session into RAM")
+            self.subtitle_lbl.setText(
+                f"Loading all {total_items} full-resolution photos into memory for zero-lag culling..."
+            )
+        else:
+            self.title_lbl.setText("Preloading Photo Buffer")
+            self.subtitle_lbl.setText(
+                f"Navigated to photo {target_idx + 1}. Loading {count} photos (photos {start_idx + 1} to {end_idx + 1}) into memory..."
+            )
         self.progress_bar.setValue(0)
         self.speed_lbl.setText("Speed: Initializing...")
         self.eta_lbl.setText("ETA: Calculating...")

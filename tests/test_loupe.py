@@ -253,9 +253,12 @@ class TestLoupeWorkstation(unittest.TestCase):
         dlg._on_format_changed(2)
         self.assertTrue(dlg.sec3.isHidden())
 
-        # Test RAM budget batch calculation
+        # Test RAM budget batch calculation scales with RAM beyond 32 photos
         dlg._update_batch_calc(2048)
-        self.assertGreaterEqual(dlg.calculated_batch_size, 4)
+        self.assertGreaterEqual(dlg.calculated_batch_size, 20)
+        dlg._update_batch_calc(8192)
+        self.assertEqual(dlg.calculated_batch_size, 109)
+        self.assertGreater(dlg.calculated_batch_size, 32)
 
     def test_dashboard_and_folder_filtering(self):
         """Verify dashboard folder filtering and project counts."""
@@ -604,9 +607,50 @@ class TestLoupeWorkstation(unittest.TestCase):
         finally:
             StorageManager().delete_project(v_proj.id)
 
+    def test_ram_scaling_beyond_32_photos(self):
+        """Verify that RAM budget scales beyond 32 photos, cache holds more than 32 photos, and ReviewView uses allocated RAM."""
+        from PySide6.QtGui import QImage
+        from loupe.ui.session_setup_dialog import SessionSetupView
+        
+        # 1. Setup view calculation with 8GB RAM -> 109 photos (> 32)
+        view = SessionSetupView()
+        view._update_batch_calc(8192)
+        self.assertEqual(view.calculated_batch_size, 109)
+        self.assertGreater(view.calculated_batch_size, 32)
+
+        # 2. Setup view calculation with 16GB RAM -> 218 photos (> 32)
+        view._update_batch_calc(16384)
+        self.assertEqual(view.calculated_batch_size, 218)
+        self.assertGreater(view.calculated_batch_size, 32)
+
+        # 3. PreloadManager with 40 photos and ram_allocation_mb=4096 (capacity 54 photos)
+        # Should keep all 40 photos in RAM without evicting down to 4 or 32
+        items = [PhotoItem(base_name=f"DSC_{i:04d}", primary_path=f"img_{i}.jpg") for i in range(40)]
+        pm = PreloadManager()
+        pm.initialize_session(items, batch_size=40, start_index=0, ram_allocation_mb=4096)
+        
+        dummy_qimg = QImage(100, 100, QImage.Format_RGB888)
+        for i in range(40):
+            pm._on_photo_loaded(i, dummy_qimg)
+            
+        # Verify that all 40 photos remain in RAM cache
+        self.assertEqual(len(pm._cache), 40)
+        self.assertTrue(pm.is_cached(0))
+        self.assertTrue(pm.is_cached(39))
+        pm.cleanup()
+
+        # 4. ReviewView auto-scales batch_size from ram_allocation_mb
+        review = ReviewView()
+        proj = Project(name="Big RAM Session", ram_allocation_mb=8192, batch_size=16, items=items)
+        review.load_project(proj)
+        self.assertGreater(proj.batch_size, 32)
+        self.assertEqual(proj.batch_size, 109)
+        review.preload_manager.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

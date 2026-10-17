@@ -115,6 +115,7 @@ class PreloadManager(QObject):
         super().__init__(parent)
         self.items: List[PhotoItem] = []
         self.batch_size: int = 16
+        self.ram_allocation_mb: Optional[int] = None
         self.current_index: int = 0
         self.direction: int = 1  # +1 for forward, -1 for backward
         self._cache: Dict[int, QImage] = {}
@@ -131,9 +132,10 @@ class PreloadManager(QObject):
         self._cache.clear()
         self.loaded_batches.clear()
 
-    def initialize_session(self, items: List[PhotoItem], batch_size: int = 16, start_index: int = 0):
+    def initialize_session(self, items: List[PhotoItem], batch_size: int = 16, start_index: int = 0, ram_allocation_mb: Optional[int] = None):
         self.items = items
         self.batch_size = max(4, batch_size)
+        self.ram_allocation_mb = ram_allocation_mb
         self.current_index = start_index
         self._cache.clear()
         self.loaded_batches.clear()
@@ -212,7 +214,7 @@ class PreloadManager(QObject):
     def _on_photo_loaded(self, index: int, qimage: QImage):
         self._cache[index] = qimage
         self.image_ready.emit(index, qimage)
-        # Evict photos further than 3 batches away to respect memory limits
+        # Evict photos further than cache limit to respect memory limits
         self._enforce_cache_limits()
 
     def _on_progress_update(self, completed: int, total: int, speed: float, eta: float, fname: str):
@@ -223,7 +225,17 @@ class PreloadManager(QObject):
         self.batch_completed.emit(batch_id)
 
     def _enforce_cache_limits(self):
-        max_cached = self.batch_size * 3
+        # Calculate maximum cache capacity from allocated RAM (at ~75MB per uncompressed frame)
+        if self.ram_allocation_mb and self.ram_allocation_mb > 0:
+            ram_capacity = max(self.batch_size, int(self.ram_allocation_mb / 75))
+            max_cached = max(self.batch_size * 3, ram_capacity)
+        else:
+            max_cached = self.batch_size * 3
+
+        # If all items in this session fit in our RAM capacity, keep them in cache permanently
+        if len(self.items) <= max_cached:
+            return
+
         if len(self._cache) > max_cached:
             # Sort keys by distance from current_index
             sorted_keys = sorted(self._cache.keys(), key=lambda idx: abs(idx - self.current_index), reverse=True)

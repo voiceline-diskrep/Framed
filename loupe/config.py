@@ -65,9 +65,9 @@ def get_total_system_ram_gb() -> int:
 class ConfigManager:
     def __init__(self):
         self._config = copy.deepcopy(DEFAULT_CONFIG)
-        # Calibrate default RAM budget to min(16, total_system_ram // 2)
+        # Calibrate default RAM budget to max(4, total_system_ram // 2)
         total_ram = get_total_system_ram_gb()
-        self._config["ram_budget_gb"] = min(16, max(4, total_ram // 2))
+        self._config["ram_budget_gb"] = max(4, total_ram // 2)
         pictures_dir = os.path.join(os.path.expanduser("~"), "Pictures", "Framed Exports")
         self._config["default_export_dir"] = pictures_dir
         self.load()
@@ -116,7 +116,7 @@ class ConfigManager:
     def reset_to_defaults(self) -> None:
         self._config = copy.deepcopy(DEFAULT_CONFIG)
         total_ram = get_total_system_ram_gb()
-        self._config["ram_budget_gb"] = min(16, max(4, total_ram // 2))
+        self._config["ram_budget_gb"] = max(4, total_ram // 2)
         self._config["default_export_dir"] = os.path.join(os.path.expanduser("~"), "Pictures", "Framed Exports")
         self.save()
 

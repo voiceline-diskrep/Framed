@@ -324,9 +324,10 @@ class SessionSetupView(QWidget):
         sec4_title.setStyleSheet(f"color: {COLOR_ACCENT};")
         sec4_layout.addWidget(sec4_title)
 
+        total_sys_gb = get_total_system_ram_gb()
         ram_expl = QLabel(
             "Preloading decodes full-resolution photos into RAM in advance so moving between photos has zero lag. "
-            "Default allocation is 50% of this session's total photo size, capped by your global budget."
+            f"The more RAM you allocate, the more photos Framed keeps in memory without needing to reload (System RAM: {total_sys_gb} GB)."
         )
         ram_expl.setFont(get_body_font(12))
         ram_expl.setWordWrap(True)
@@ -337,27 +338,29 @@ class SessionSetupView(QWidget):
         slider_row = QHBoxLayout()
         slider_row.setSpacing(16)
 
+        max_slider_mb = max(16384, total_sys_gb * 1024)
+        default_ram_mb = min(config.get("ram_budget_gb", 16) * 1024, max_slider_mb)
+
         self.ram_slider = QSlider(Qt.Horizontal)
-        self.ram_slider.setRange(512, 16384)  # 512 MB to 16 GB
-        self.ram_slider.setValue(2048)
+        self.ram_slider.setRange(512, max_slider_mb)
+        self.ram_slider.setSingleStep(512)
+        self.ram_slider.setPageStep(2048)
+        self.ram_slider.setValue(default_ram_mb)
         self.ram_slider.valueChanged.connect(self._on_ram_slider_changed)
         slider_row.addWidget(self.ram_slider, stretch=1)
 
-        self.ram_val_lbl = QLabel("2,048 MB")
-        self.ram_val_lbl.setFont(get_mono_font(13, bold=True))
-        self.ram_val_lbl.setFixedWidth(90)
+        self.ram_val_lbl = QLabel(self._format_ram_mb(default_ram_mb))
+        self.ram_val_lbl.setFont(get_mono_font(12, bold=True))
+        self.ram_val_lbl.setFixedWidth(160)
         self.ram_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         slider_row.addWidget(self.ram_val_lbl)
 
         sec4_layout.addLayout(slider_row)
 
-        self.batch_calc_lbl = QLabel(
-            "Buffer holding: 16 full-resolution photos.\n"
-            "Preloads the first 16 photos before starting. When you reach photo 16, "
-            "Framed will pause to load the next batch with live speed and ETA."
-        )
+        self.batch_calc_lbl = QLabel("")
         self.batch_calc_lbl.setFont(get_mono_font(11))
         self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+        self._update_batch_calc(default_ram_mb)
         sec4_layout.addWidget(self.batch_calc_lbl)
 
         center_layout.addWidget(sec4)
@@ -566,23 +569,59 @@ class SessionSetupView(QWidget):
         self.start_btn.setEnabled(count > 0)
 
         global_budget_mb = config.get("ram_budget_gb", 16) * 1024
-        rec_ram_mb = max(512, min(int(total_mb * 0.5), global_budget_mb))
+        total_sys_gb = get_total_system_ram_gb()
+        max_slider_mb = max(16384, total_sys_gb * 1024)
+
+        # Allocate enough RAM to hold scanned photos uncompressed without reload pauses
+        needed_ram_mb = max(1024, count * 75)
+        rec_ram_mb = min(needed_ram_mb, max(2048, global_budget_mb))
+        rec_ram_mb = max(512, min(rec_ram_mb, max_slider_mb))
+
+        self.ram_slider.blockSignals(True)
+        self.ram_slider.setRange(512, max_slider_mb)
         self.ram_slider.setValue(rec_ram_mb)
+        self.ram_val_lbl.setText(self._format_ram_mb(rec_ram_mb))
+        self.ram_slider.blockSignals(False)
         self._update_batch_calc(rec_ram_mb)
 
+    @staticmethod
+    def _format_ram_mb(val_mb: int) -> str:
+        if val_mb >= 1024:
+            gb = val_mb / 1024.0
+            if gb.is_integer():
+                return f"{int(gb)} GB ({val_mb:,} MB)"
+            return f"{gb:.1f} GB ({val_mb:,} MB)"
+        return f"{val_mb:,} MB"
+
     def _on_ram_slider_changed(self, val_mb: int):
-        self.ram_val_lbl.setText(f"{val_mb:,} MB")
+        self.ram_val_lbl.setText(self._format_ram_mb(val_mb))
         self._update_batch_calc(val_mb)
 
     def _update_batch_calc(self, ram_mb: int):
         avg_photo_mb = 75
-        batch_size = max(4, min(32, int(ram_mb / avg_photo_mb)))
-        self.calculated_batch_size = batch_size
-        self.batch_calc_lbl.setText(
-            f"Buffer holds: {batch_size} full-resolution photos in memory.\n"
-            f"Preloads the first {batch_size} photos before starting. When you reach photo {batch_size}, "
-            f"Framed will pause to load the next {batch_size} photos with live speed and ETA."
-        )
+        ram_capacity = max(4, int(ram_mb / avg_photo_mb))
+        self.calculated_batch_size = ram_capacity
+
+        count = len(self.scanned_items) if hasattr(self, "scanned_items") and self.scanned_items else 0
+        if count > 0 and ram_capacity >= count:
+            self.batch_calc_lbl.setText(
+                f"Memory buffer: {ram_capacity} photos capacity.\n"
+                f"✓ Entire session ({count} photos) will fit in RAM — instant browsing with zero reload pauses!"
+            )
+            self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+        elif count > 0:
+            self.batch_calc_lbl.setText(
+                f"Memory buffer: {ram_capacity} photos capacity.\n"
+                f"Preloads the first {ram_capacity} photos before starting. When you reach photo {ram_capacity}, "
+                f"Framed will pause to load the next batch with live speed and ETA."
+            )
+            self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+        else:
+            self.batch_calc_lbl.setText(
+                f"Memory buffer: {ram_capacity} photos capacity.\n"
+                f"Holds up to {ram_capacity} full-resolution photos simultaneously in memory."
+            )
+            self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
 
     def reset_form(self):
         """Reset form fields when opening a new session."""
@@ -599,6 +638,16 @@ class SessionSetupView(QWidget):
         self.date_edit.setDate(QDate.currentDate())
         self.rb_both.setChecked(True)
         self._update_format_visibility()
+
+        total_sys_gb = get_total_system_ram_gb()
+        max_slider_mb = max(16384, total_sys_gb * 1024)
+        default_ram_mb = min(config.get("ram_budget_gb", 16) * 1024, max_slider_mb)
+        self.ram_slider.blockSignals(True)
+        self.ram_slider.setRange(512, max_slider_mb)
+        self.ram_slider.setValue(default_ram_mb)
+        self.ram_val_lbl.setText(self._format_ram_mb(default_ram_mb))
+        self.ram_slider.blockSignals(False)
+        self._update_batch_calc(default_ram_mb)
 
     def _start_session(self):
         if not self.scanned_items and self.source_dir_edit.text().strip():
