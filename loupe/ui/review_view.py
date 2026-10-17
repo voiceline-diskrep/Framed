@@ -209,6 +209,7 @@ class ReviewView(QWidget):
         # Right Side Panel (Stats & EXIF)
         self.stats_panel = StatsPanel(self)
         self.stats_panel.open_not_accepted_requested.connect(self._open_not_accepted_tray)
+        self.stats_panel.start_zoomed_changed.connect(self._on_start_zoomed_changed)
         center_area.addWidget(self.stats_panel)
 
         root_layout.addLayout(center_area, stretch=1)
@@ -288,11 +289,47 @@ class ReviewView(QWidget):
 
         bottom_layout.addLayout(status_row)
         root_layout.addWidget(bottom_bar)
+        self.refresh_key_bindings()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "preload_overlay") and self.preload_overlay:
+            self.preload_overlay.setGeometry(self.rect())
+
+    def refresh_key_bindings(self):
+        keep_key = config.get_key_binding("keep").upper()
+        reject_key = config.get_key_binding("reject").upper()
+        maybe_key = config.get_key_binding("maybe", "E").upper()
+        prev_key = config.get_key_binding("prev").upper()
+        next_key = config.get_key_binding("next").upper()
+
+        self.prev_btn.setText(f"Previous ({prev_key})")
+        self.reject_btn.setText(f"Not Accepted ({reject_key})")
+        self.maybe_btn.setText(f"Maybe ({maybe_key})")
+        self.keep_btn.setText(f"Keep Photo ({keep_key})")
+        self.next_btn.setText(f"Next ({next_key})")
+
+    def _on_start_zoomed_changed(self, enabled: bool, zoom_level: float):
+        if self.project and self.project.items:
+            qimg = self.preload_manager.get_image(self.project.current_index)
+            if qimg and not qimg.isNull():
+                self.canvas.set_image(qimg, start_zoomed_in=enabled, zoom_level=zoom_level)
 
     def load_project(self, project: Project):
         self.project = project
         self.project_title_lbl.setText(project.name)
         self.undo_stack.clear()
+        self.refresh_key_bindings()
+
+        # Sync stats panel zoom controls from config
+        self.stats_panel.start_zoomed_cb.blockSignals(True)
+        self.stats_panel.zoom_slider.blockSignals(True)
+        self.stats_panel.start_zoomed_cb.setChecked(config.get("start_zoomed_in", False))
+        curr_lvl = int(config.get("zoom_start_level", 2.0) * 100)
+        self.stats_panel.zoom_slider.setValue(curr_lvl)
+        self.stats_panel.zoom_lvl_lbl.setText(f"{curr_lvl}%")
+        self.stats_panel.start_zoomed_cb.blockSignals(False)
+        self.stats_panel.zoom_slider.blockSignals(False)
 
         # Initialize preloader
         start_idx = max(0, min(project.current_index, len(project.items) - 1)) if project.items else 0
@@ -417,8 +454,9 @@ class ReviewView(QWidget):
         if not (0 <= target_idx < len(self.project.items)):
             return
 
-        # Always update project current index to destination
+        # Always update project current index to destination and persist
         self.project.current_index = target_idx
+        storage.save_project(self.project)
 
         # Check if navigating requires a batch pause
         needs_pause, b_start, b_end = self.preload_manager.check_navigation(target_idx, direction)
@@ -445,6 +483,7 @@ class ReviewView(QWidget):
         item = self.project.items[idx]
         self.undo_stack.append((idx, item.status))
         item.status = "kept"
+        storage.save_project(self.project)
         self._display_current_photo()
         self.go_next()
 
@@ -455,6 +494,7 @@ class ReviewView(QWidget):
         item = self.project.items[idx]
         self.undo_stack.append((idx, item.status))
         item.status = "maybe"
+        storage.save_project(self.project)
         self._display_current_photo()
         self.go_next()
 
@@ -465,6 +505,7 @@ class ReviewView(QWidget):
         item = self.project.items[idx]
         self.undo_stack.append((idx, item.status))
         item.status = "rejected"
+        storage.save_project(self.project)
         self._display_current_photo()
         self.go_next()
 
@@ -479,7 +520,9 @@ class ReviewView(QWidget):
                 self.back_to_dashboard.emit()
             elif dlg.choice == FinishSessionDialog.FINISH_AND_EXPORT:
                 storage.save_project(self.project)
+                self.preload_manager.cleanup()
                 self.export_requested.emit(self.project.id)
+                self.back_to_dashboard.emit()
 
     def undo_last_decision(self):
         if not self.undo_stack or not self.project:
@@ -487,6 +530,7 @@ class ReviewView(QWidget):
         idx, old_status = self.undo_stack.pop()
         if 0 <= idx < len(self.project.items):
             self.project.items[idx].status = old_status
+            storage.save_project(self.project)
             self.navigate_to(idx, direction=-1)
 
     def _fit_current_image(self):
@@ -514,10 +558,12 @@ class ReviewView(QWidget):
             if it.id == item_id:
                 it.status = "kept"
                 break
+        storage.save_project(self.project)
         self._display_current_photo()
 
     def _on_export_clicked(self):
         if self.project:
+            storage.save_project(self.project)
             self.export_requested.emit(self.project.id)
 
     def _handle_escape_request(self):
@@ -556,19 +602,19 @@ class ReviewView(QWidget):
         elif event.modifiers() & Qt.ControlModifier and key == Qt.Key_Z:
             self.undo_last_decision()
             event.accept()
-        elif key_str == keep_key:
+        elif key_str and key_str == keep_key:
             self.keep_current()
             event.accept()
-        elif key_str == reject_key:
+        elif key_str and key_str == reject_key:
             self.reject_current()
             event.accept()
-        elif key_str == maybe_key or key_str in ("E", "M") or key == Qt.Key_E:
+        elif key_str and key_str == maybe_key:
             self.maybe_current()
             event.accept()
-        elif key_str == prev_key or key == Qt.Key_Left:
+        elif (key_str and key_str == prev_key) or key == Qt.Key_Left:
             self.go_previous()
             event.accept()
-        elif key_str == next_key or key == Qt.Key_Right:
+        elif (key_str and key_str == next_key) or key == Qt.Key_Right:
             self.go_next()
             event.accept()
         elif key == Qt.Key_F:

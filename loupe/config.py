@@ -24,7 +24,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "theme_mode": "dark",
     "auto_check_updates": True,
     "update_manifest_url": "https://api.github.com/repos/voiceline-diskrep/Framed/releases/latest",
-    "app_version": "1.1.6",
+    "app_version": "1.1.8",
 }
 
 def get_app_dir() -> str:
@@ -117,7 +117,7 @@ class ConfigManager:
         self._config = copy.deepcopy(DEFAULT_CONFIG)
         total_ram = get_total_system_ram_gb()
         self._config["ram_budget_gb"] = min(16, max(4, total_ram // 2))
-        self._config["default_export_dir"] = os.path.join(os.path.expanduser("~"), "Pictures", "Loupe Exports")
+        self._config["default_export_dir"] = os.path.join(os.path.expanduser("~"), "Pictures", "Framed Exports")
         self.save()
 
 # Global config instance

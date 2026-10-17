@@ -142,6 +142,7 @@ class VideoSessionView(QWidget):
                 border-color: {COLOR_ACCENT};
             }}
         """)
+        self.edit_dir.textChanged.connect(self._on_dir_text_changed)
         r_dir.addWidget(self.edit_dir, stretch=1)
 
         btn_browse = QPushButton("Browse Folder...")
@@ -376,6 +377,22 @@ class VideoSessionView(QWidget):
         for f in storage.get_folders():
             self.combo_folder.addItem(f.name, f.id)
 
+    def _on_dir_text_changed(self, text: str):
+        d = text.strip()
+        if not d:
+            self.lbl_scan_status.setText("No directory selected.")
+            self.lbl_scan_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+            self.btn_create.setEnabled(False)
+            self.scanned_items.clear()
+            return
+        if os.path.isdir(d):
+            self._scan_directory(d)
+        else:
+            self.lbl_scan_status.setText("Directory does not exist.")
+            self.lbl_scan_status.setStyleSheet(f"color: {COLOR_STATUS_REJECTED};")
+            self.btn_create.setEnabled(False)
+            self.scanned_items.clear()
+
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "Select Video Directory", self.edit_dir.text())
         if d:
@@ -422,7 +439,7 @@ class VideoSessionView(QWidget):
             self.lbl_scan_status.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
             self.btn_create.setEnabled(True)
             folder_base = os.path.basename(os.path.normpath(folder_path))
-            if folder_base and self.edit_name.text() in ("Untitled Video Session", ""):
+            if folder_base and self.edit_name.text() in ("Untitled Video Session", "New Video Session", ""):
                 self.edit_name.setText(folder_base)
         else:
             self.lbl_scan_status.setText("No supported video clips found in directory.")
@@ -432,7 +449,9 @@ class VideoSessionView(QWidget):
     def reset_form(self):
         """Reset form fields when starting fresh."""
         self._populate_folders()
+        self.edit_dir.blockSignals(True)
         self.edit_dir.setText("")
+        self.edit_dir.blockSignals(False)
         self.lbl_scan_status.setText("No directory selected.")
         self.lbl_scan_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
         self.btn_create.setEnabled(False)
@@ -461,6 +480,7 @@ class VideoSessionView(QWidget):
             folder_id=folder_id,
             source_dir=src_dir,
             media_type="video",
+            view_uncompressed=self.rb_uncompressed.isChecked(),
             shoot_date=self.date_edit.date().toString("yyyy-MM-dd"),
             items=self.scanned_items
         )

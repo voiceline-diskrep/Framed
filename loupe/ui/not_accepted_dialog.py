@@ -3,7 +3,7 @@
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget, QFrame, QGridLayout
+    QScrollArea, QWidget, QFrame, QGridLayout, QApplication
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -75,11 +75,30 @@ class NotAcceptedDialog(QDialog):
     def __init__(self, rejected_items: List[PhotoItem], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Not Accepted Photos — Review & Recovery")
-        self.setMinimumSize(740, 560)
+        self.setMinimumSize(640, 420)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
         self.rejected_items = rejected_items
 
         self._init_ui()
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self):
+        try:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                avail = screen.availableGeometry()
+                target_w = min(760, max(640, avail.width() - 40))
+                target_h = min(560, max(420, avail.height() - 60))
+                self.resize(target_w, target_h)
+                x = avail.x() + (avail.width() - target_w) // 2
+                y = avail.y() + max(10, (avail.height() - target_h) // 2)
+                self.move(x, y)
+        except Exception:
+            self.resize(740, 520)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_to_available_screen()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)

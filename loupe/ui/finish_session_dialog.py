@@ -32,15 +32,18 @@ class FinishSessionDialog(QDialog):
         self._fit_to_available_screen()
 
     def _fit_to_available_screen(self):
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen:
-            avail = screen.availableGeometry()
-            target_w = min(540, max(460, avail.width() - 40))
-            target_h = min(460, max(360, avail.height() - 60))
-            self.resize(target_w, target_h)
-            x = avail.x() + (avail.width() - target_w) // 2
-            y = avail.y() + max(10, (avail.height() - target_h) // 2)
-            self.move(x, y)
+        try:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                avail = screen.availableGeometry()
+                target_w = min(540, max(460, avail.width() - 40))
+                target_h = min(460, max(360, avail.height() - 60))
+                self.resize(target_w, target_h)
+                x = avail.x() + (avail.width() - target_w) // 2
+                y = avail.y() + max(10, (avail.height() - target_h) // 2)
+                self.move(x, y)
+        except Exception:
+            self.resize(520, 400)
 
     def showEvent(self, event):
         super().showEvent(event)

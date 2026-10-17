@@ -78,6 +78,28 @@ def compress_video_to_proxy(src_path: str, dest_path: str, target_max_width: int
     if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
         return dest_path
 
+    # Prefer ffmpeg if available on PATH so audio tracks are preserved
+    import shutil
+    import subprocess
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        try:
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            cmd = [
+                ffmpeg_bin, "-y", "-i", src_path,
+                "-vf", f"scale='min({target_max_width},iw)':-2",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                "-c:a", "aac", "-b:a", "128k",
+                dest_path
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags, timeout=300)
+            if res.returncode == 0 and os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+                if progress_cb:
+                    progress_cb(1.0)
+                return dest_path
+        except Exception:
+            pass
+
     cap = cv2.VideoCapture(src_path)
     if not cap.isOpened():
         return src_path

@@ -3,7 +3,8 @@
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QCheckBox, QSlider, QFrame, QFileDialog, QMessageBox, QWidget, QScrollArea
+    QCheckBox, QSlider, QFrame, QFileDialog, QMessageBox, QWidget, QScrollArea,
+    QApplication
 )
 from PySide6.QtCore import Qt, Signal
 from loupe.config import config, get_total_system_ram_gb
@@ -60,15 +61,18 @@ class SettingsDialog(QDialog):
         self._load_values()
 
     def _fit_to_available_screen(self):
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen:
-            avail = screen.availableGeometry()
-            target_w = min(680, max(540, avail.width() - 40))
-            target_h = min(620, max(360, avail.height() - 60))
-            self.resize(target_w, target_h)
-            x = avail.x() + (avail.width() - target_w) // 2
-            y = avail.y() + max(10, (avail.height() - target_h) // 2)
-            self.move(x, y)
+        try:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                avail = screen.availableGeometry()
+                target_w = min(680, max(540, avail.width() - 40))
+                target_h = min(620, max(360, avail.height() - 60))
+                self.resize(target_w, target_h)
+                x = avail.x() + (avail.width() - target_w) // 2
+                y = avail.y() + max(10, (avail.height() - target_h) // 2)
+                self.move(x, y)
+        except Exception:
+            self.resize(640, 520)
 
     def showEvent(self, event):
         super().showEvent(event)

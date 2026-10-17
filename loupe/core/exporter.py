@@ -45,6 +45,10 @@ class ExportWorker(QThread):
             unselected_jpeg = os.path.join(base_dir, "Unselected", "JPEG")
 
             # Collect all operations: list of (src_path, dst_dir)
+            fmt_mode = getattr(self.project, "format_mode", "both")
+            include_raw = fmt_mode in ("both", "raw_only")
+            include_jpeg = fmt_mode in ("both", "jpeg_only")
+
             tasks = []
             for item in self.project.items:
                 if item.status in ("kept", "selected"):
@@ -57,9 +61,9 @@ class ExportWorker(QThread):
                     target_raw_dir = unselected_raw
                     target_jpeg_dir = unselected_jpeg
 
-                if item.raw_path and os.path.exists(item.raw_path):
+                if include_raw and item.raw_path and os.path.exists(item.raw_path):
                     tasks.append((item.raw_path, target_raw_dir))
-                if item.jpeg_path and os.path.exists(item.jpeg_path):
+                if include_jpeg and item.jpeg_path and os.path.exists(item.jpeg_path):
                     tasks.append((item.jpeg_path, target_jpeg_dir))
 
             # Include any 'edited result' Lightroom photos if present

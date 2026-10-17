@@ -224,6 +224,7 @@ class SessionSetupView(QWidget):
                 border-color: {COLOR_ACCENT};
             }}
         """)
+        self.source_dir_edit.textChanged.connect(self._on_source_dir_text_changed)
         dir_row.addWidget(self.source_dir_edit, stretch=1)
 
         browse_btn = QPushButton("Browse Folder...")
@@ -464,12 +465,30 @@ class SessionSetupView(QWidget):
         is_both = self.rb_both.isChecked()
         self.sec3.setVisible(is_both)
 
+    def _on_source_dir_text_changed(self, text: str):
+        d = text.strip()
+        if not d:
+            self.scan_status_lbl.setText("No directory selected yet.")
+            self.scan_status_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+            self.start_btn.setEnabled(False)
+            self.scanned_items = []
+            return
+        if os.path.isdir(d):
+            if self.name_edit.text() in ("Nordic Coastal Shoot", "New Photo Shoot", ""):
+                self.name_edit.setText(os.path.basename(os.path.normpath(d)))
+            self._rescan_items()
+        else:
+            self.scan_status_lbl.setText("Selected directory does not exist.")
+            self.scan_status_lbl.setStyleSheet(f"color: {COLOR_STATUS_REJECTED};")
+            self.start_btn.setEnabled(False)
+            self.scanned_items = []
+
     def _browse_directory(self):
         d = QFileDialog.getExistingDirectory(self, "Select Photo Directory")
         if d:
             self.source_dir_edit.setText(d)
-            if self.name_edit.text() in ("Nordic Coastal Shoot", ""):
-                self.name_edit.setText(os.path.basename(d))
+            if self.name_edit.text() in ("Nordic Coastal Shoot", "New Photo Shoot", ""):
+                self.name_edit.setText(os.path.basename(os.path.normpath(d)))
             self._rescan_items()
 
     def _rescan_items(self):
@@ -512,8 +531,8 @@ class SessionSetupView(QWidget):
             if fmt_mode == "jpeg_only" and not has_jpeg:
                 continue
 
-            r_path = raw_files.get(stem)
-            j_path = jpeg_files.get(stem)
+            r_path = raw_files.get(stem) if fmt_mode in ("both", "raw_only") else None
+            j_path = jpeg_files.get(stem) if fmt_mode in ("both", "jpeg_only") else None
             r_sz = os.path.getsize(r_path) if r_path else 0
             j_sz = os.path.getsize(j_path) if j_path else 0
 
@@ -568,7 +587,9 @@ class SessionSetupView(QWidget):
     def reset_form(self):
         """Reset form fields when opening a new session."""
         self._populate_folders()
+        self.source_dir_edit.blockSignals(True)
         self.source_dir_edit.setText("")
+        self.source_dir_edit.blockSignals(False)
         self.scan_status_lbl.setText("No directory selected yet.")
         self.scan_status_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
         self.start_btn.setEnabled(False)
@@ -580,6 +601,9 @@ class SessionSetupView(QWidget):
         self._update_format_visibility()
 
     def _start_session(self):
+        if not self.scanned_items and self.source_dir_edit.text().strip():
+            self._rescan_items()
+
         name = self.name_edit.text().strip()
         if not name:
             QMessageBox.warning(self, "Invalid Name", "Please enter a valid session name.")

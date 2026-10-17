@@ -34,7 +34,14 @@ class PreloadWorker(QThread):
             self.queue.clear()
         self.wait(1500)
 
+    def ensure_running(self):
+        with QMutexLocker(self.mutex):
+            self._is_running = True
+        if not self.isRunning():
+            self.start()
+
     def set_batch_tasks(self, batch_id: int, indices: List[int], items: List[PhotoItem]):
+        self.ensure_running()
         with QMutexLocker(self.mutex):
             self.items = items
             self.current_batch_id = batch_id
@@ -130,6 +137,8 @@ class PreloadManager(QObject):
         self.current_index = start_index
         self._cache.clear()
         self.loaded_batches.clear()
+        if self._worker:
+            self._worker.ensure_running()
 
     def preload_batch_sync(self, batch_id: int):
         """Synchronously load a batch of photos into cache (used for immediate tests and startup)."""
@@ -155,6 +164,7 @@ class PreloadManager(QObject):
         if not needed:
             self.batch_completed.emit(batch_index)
             return
+        self._worker.ensure_running()
         self._worker.set_batch_tasks(batch_index, needed, self.items)
 
     def check_navigation(self, target_index: int, direction: int = 1) -> Tuple[bool, int, int]:

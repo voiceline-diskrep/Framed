@@ -72,6 +72,7 @@ class Project:
     edited_result_dir: str = ""
     edited_files: List[str] = field(default_factory=list)
     media_type: str = "photo"  # "photo" or "video"
+    view_uncompressed: bool = False
 
     @property
     def edited_count(self) -> int:

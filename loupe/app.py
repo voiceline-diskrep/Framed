@@ -147,6 +147,7 @@ class FramedMainWindow(QMainWindow):
         dlg = SettingsDialog(self)
         dlg.restart_tour_requested.connect(self._restart_tour)
         dlg.exec()
+        self.review_view.refresh_key_bindings()
 
     def _restart_tour(self):
         tour = TourDialog(self)

@@ -540,8 +540,74 @@ class TestLoupeWorkstation(unittest.TestCase):
         self.assertTrue(video_dialog.cb_workspace.isChecked())
         self.assertIn("Selected", video_dialog.preview_lbl.text())
 
+    def test_v118_bugfixes(self):
+        """Regression tests for v1.1.8 bug fixes: SettingsDialog, PreloadManager restart, format_mode export, video undo/uncompressed."""
+        from loupe.ui.video_review_view import VideoReviewView
+        from loupe.ui.export_dialog import ExportDialog
+
+        # 1. SettingsDialog instantiation (no NameError: QApplication)
+        settings_dlg = SettingsDialog()
+        self.assertIsNotNone(settings_dlg)
+
+        # 2. PreloadManager worker restart after cleanup()
+        items = [
+            PhotoItem(base_name="DSC08491", primary_path=os.path.join(self.sample_shoot_dir, "DSC08491.JPG")),
+            PhotoItem(base_name="DSC08492", primary_path=os.path.join(self.sample_shoot_dir, "DSC08492.JPG")),
+        ]
+        pm = PreloadManager()
+        pm.initialize_session(items, batch_size=2, start_index=0)
+        pm.cleanup()
+        # Re-initializing after cleanup must restart the worker thread
+        pm.initialize_session(items, batch_size=2, start_index=0)
+        self.assertTrue(pm._worker.isRunning())
+        pm.cleanup()
+
+        # 3. ExportWorker respects format_mode ("raw_only" vs "jpeg_only")
+        j_path = os.path.join(self.sample_shoot_dir, "DSC08491.JPG")
+        r_path = os.path.join(self.sample_shoot_dir, "DSC08491.ARW")
+        item_pair = PhotoItem(base_name="DSC08491", raw_path=r_path, jpeg_path=j_path, primary_path=r_path, status="kept")
+        raw_proj = Project(name="RAW Only Test", format_mode="raw_only", items=[item_pair])
+        dest_raw = os.path.join(self.temp_dir, "raw_only_export")
+        w_raw = ExportWorker(raw_proj, dest_raw, separate_by_workspace=False)
+        res_raw = []
+        w_raw.export_finished.connect(lambda r: res_raw.append(r))
+        w_raw.run()
+        self.assertEqual(len(res_raw), 1)
+        self.assertEqual(res_raw[0]["total_copied"], 1)
+        self.assertTrue(os.path.exists(os.path.join(res_raw[0]["base_dir"], "Selected", "RAW", "DSC08491.ARW")))
+        self.assertFalse(os.path.exists(os.path.join(res_raw[0]["base_dir"], "Selected", "JPEG", "DSC08491.JPG")))
+
+        # Check ExportDialog hierarchy preview for raw_only
+        exp_dlg = ExportDialog(raw_proj)
+        self.assertIn("RAW/", exp_dlg.preview_lbl.text())
+        self.assertNotIn("JPEG/", exp_dlg.preview_lbl.text())
+
+        # 4. VideoReviewView undo & duration formatting (> 60 minutes)
+        v_review = VideoReviewView()
+        self.assertEqual(v_review._format_ms(3661000), "01:01:01")
+        self.assertEqual(v_review._format_ms(65000), "01:05")
+
+        v_items = [
+            PhotoItem(base_name="CLIP1", primary_path="clip1.mp4", is_video=True, status="pending"),
+            PhotoItem(base_name="CLIP2", primary_path="clip2.mp4", is_video=True, status="pending"),
+        ]
+        v_proj = Project(name="Video Undo Test", media_type="video", view_uncompressed=True, items=v_items, current_index=0)
+        try:
+            v_review.project = v_proj
+            v_review.current_item = v_items[0]
+            v_review.mark_selected()
+            self.assertEqual(v_proj.items[0].status, "selected")
+            self.assertEqual(v_proj.current_index, 1)
+            v_review.undo_last_decision()
+            self.assertEqual(v_proj.items[0].status, "pending")
+            self.assertEqual(v_proj.current_index, 0)
+        finally:
+            StorageManager().delete_project(v_proj.id)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

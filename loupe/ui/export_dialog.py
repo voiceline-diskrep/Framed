@@ -267,6 +267,7 @@ class ExportDialog(QDialog):
         p_name = sanitize_folder_name(self.project.name)
         use_ws = self.cb_workspace.isChecked()
         w_name = sanitize_folder_name(self.project.get_workspace_name())
+        fmt_mode = getattr(self.project, "format_mode", "both")
 
         lines = []
         if use_ws:
@@ -277,22 +278,23 @@ class ExportDialog(QDialog):
             lines.append(f"📁 {p_name}/")
             indent = "   "
 
-        lines.extend([
-            f"{indent}├── 📁 Selected/     ({self.project.kept_count} photos)",
-            f"{indent}│    ├── 📁 RAW/",
-            f"{indent}│    └── 📁 JPEG/",
-        ])
+        def _fmt_subfolders(prefix: str):
+            if fmt_mode == "raw_only":
+                return [f"{prefix}└── 📁 RAW/"]
+            elif fmt_mode == "jpeg_only":
+                return [f"{prefix}└── 📁 JPEG/"]
+            return [
+                f"{prefix}├── 📁 RAW/",
+                f"{prefix}└── 📁 JPEG/",
+            ]
+
+        lines.append(f"{indent}├── 📁 Selected/     ({self.project.kept_count} photos)")
+        lines.extend(_fmt_subfolders(f"{indent}│    "))
         if self.project.maybe_count > 0:
-            lines.extend([
-                f"{indent}├── 📁 Maybe/        ({self.project.maybe_count} photos)",
-                f"{indent}│    ├── 📁 RAW/",
-                f"{indent}│    └── 📁 JPEG/",
-            ])
-        lines.extend([
-            f"{indent}└── 📁 Unselected/   ({self.project.rejected_count + self.project.pending_count} photos)",
-            f"{indent}     ├── 📁 RAW/",
-            f"{indent}     └── 📁 JPEG/",
-        ])
+            lines.append(f"{indent}├── 📁 Maybe/        ({self.project.maybe_count} photos)")
+            lines.extend(_fmt_subfolders(f"{indent}│    "))
+        lines.append(f"{indent}└── 📁 Unselected/   ({self.project.rejected_count + self.project.pending_count} photos)")
+        lines.extend(_fmt_subfolders(f"{indent}     "))
         if self.project.edited_count > 0:
             lines.append(f"{indent}└── 📁 edited result/ ({self.project.edited_count} photos)")
         self.preview_lbl.setText("\n".join(lines))

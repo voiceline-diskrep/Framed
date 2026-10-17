@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QUrl, QTime
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
+from loupe.config import config
 from loupe.models import Project, PhotoItem
 from loupe.storage import storage
 from loupe.core.video_engine import get_video_metadata, VideoProxyQueue
@@ -33,9 +34,11 @@ class VideoReviewView(QWidget):
         self.current_item: Optional[PhotoItem] = None
         self.view_uncompressed: bool = False
         self.proxy_queue: Optional[VideoProxyQueue] = None
+        self.undo_stack: list = []
 
         self._init_player()
         self._init_ui()
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def _init_player(self):
         self.player = QMediaPlayer(self)
@@ -109,7 +112,7 @@ class VideoReviewView(QWidget):
         self.btn_export = QPushButton("Export Results")
         self.btn_export.setIcon(render_icon("export", 14, COLOR_TEXT_PRIMARY))
         self.btn_export.setStyleSheet(f"border: 1px solid {COLOR_BORDER_DISTINCT}; padding: 6px 14px;")
-        self.btn_export.clicked.connect(lambda: self.export_requested.emit(self.project.id if self.project else ""))
+        self.btn_export.clicked.connect(self._on_export_clicked)
         h_layout.addWidget(self.btn_export)
 
         main_layout.addWidget(header)
@@ -185,7 +188,7 @@ class VideoReviewView(QWidget):
         """)
         act_layout = QHBoxLayout(action_bar)
         act_layout.setContentsMargins(16, 8, 16, 8)
-        act_layout.setSpacing(16)
+        act_layout.setSpacing(14)
 
         # Navigation buttons
         self.btn_prev = QPushButton("Previous [A]")
@@ -253,6 +256,11 @@ class VideoReviewView(QWidget):
         self.btn_next.setIcon(render_icon("arrow_right", 12, COLOR_TEXT_PRIMARY))
         self.btn_next.clicked.connect(self._next_clip)
         act_layout.addWidget(self.btn_next)
+
+        self.btn_undo = QPushButton("Undo [Ctrl+Z]")
+        self.btn_undo.setIcon(render_icon("restore", 12, COLOR_TEXT_SECONDARY))
+        self.btn_undo.clicked.connect(self.undo_last_decision)
+        act_layout.addWidget(self.btn_undo)
 
         player_layout.addWidget(action_bar)
         body.addWidget(player_container, stretch=1)
@@ -328,7 +336,7 @@ class VideoReviewView(QWidget):
         k_title.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
         k_layout.addWidget(k_title)
 
-        for key, desc in [("W", "Accept / Selected"), ("S", "Similar / Alternative"), ("X", "Move to Unselected"), ("A / D", "Prev / Next Clip"), ("Space", "Play / Pause")]:
+        for key, desc in [("W", "Accept / Selected"), ("S / E", "Similar / Alternative"), ("X", "Move to Unselected"), ("A / D", "Prev / Next Clip"), ("Ctrl+Z", "Undo Last Decision"), ("Space", "Play / Pause")]:
             row = QHBoxLayout()
             klbl = QLabel(key)
             klbl.setFont(get_mono_font(11, bold=True))
@@ -350,18 +358,29 @@ class VideoReviewView(QWidget):
     def load_project(self, project: Project):
         """Load a video project session without preloading into RAM."""
         self.project = project
+        self.undo_stack.clear()
         self.lbl_title.setText(project.name)
+
+        # Respect view_uncompressed choice saved on the project
+        self.view_uncompressed = getattr(project, "view_uncompressed", False)
+        self.cb_no_compression.blockSignals(True)
+        self.cb_no_compression.setChecked(self.view_uncompressed)
+        self.cb_no_compression.blockSignals(False)
 
         if not self.project.items:
             self.lbl_counter.setText("No video clips")
             return
 
-        # Start background proxy generation queue
+        # Stop any previous proxy queue
         if self.proxy_queue:
             self.proxy_queue.cancel()
-        self.proxy_queue = VideoProxyQueue(self.project.id, self.project.items, self)
-        self.proxy_queue.clip_proxy_ready.connect(self._on_clip_proxy_ready)
-        self.proxy_queue.start()
+            self.proxy_queue = None
+
+        # Only start background proxy generation if compressed mode is active
+        if not self.view_uncompressed:
+            self.proxy_queue = VideoProxyQueue(self.project.id, self.project.items, self)
+            self.proxy_queue.clip_proxy_ready.connect(self._on_clip_proxy_ready)
+            self.proxy_queue.start()
 
         # Load first item
         idx = max(0, min(self.project.current_index, len(self.project.items) - 1))
@@ -410,7 +429,9 @@ class VideoReviewView(QWidget):
         orig_mb = meta['file_size'] / (1024 * 1024)
         self.lbl_meta_size.setText(f"Source Size: {orig_mb:.1f} MB")
 
-        if self.current_item.proxy_path and os.path.exists(self.current_item.proxy_path):
+        if self.view_uncompressed:
+            self.lbl_proxy_size.setText("Proxy: Disabled (Direct Stream)")
+        elif self.current_item.proxy_path and os.path.exists(self.current_item.proxy_path):
             proxy_mb = os.path.getsize(self.current_item.proxy_path) / (1024 * 1024)
             self.lbl_proxy_size.setText(f"Proxy Size: {proxy_mb:.1f} MB")
         else:
@@ -423,7 +444,7 @@ class VideoReviewView(QWidget):
         if st in ("selected", "kept"):
             self.lbl_decision_badge.setText("✓ SELECTED (ACCEPTED)")
             self.lbl_decision_badge.setStyleSheet("background-color: #1A3323; color: #7BE4A2; border: 1px solid #2E7D32; font-weight: bold;")
-        elif st == "similar":
+        elif st in ("similar", "maybe"):
             self.lbl_decision_badge.setText("~ SIMILAR (ALTERNATIVE)")
             self.lbl_decision_badge.setStyleSheet("background-color: #172D3D; color: #5BC0DE; border: 1px solid #337AB7; font-weight: bold;")
         elif st in ("unselected", "rejected"):
@@ -436,6 +457,11 @@ class VideoReviewView(QWidget):
         all_done = bool(self.project and len(self.project.items) > 0 and self.project.pending_count == 0)
         self.btn_finish.setVisible(all_done)
 
+    def _on_export_clicked(self):
+        if self.project:
+            storage.save_project(self.project)
+            self.export_requested.emit(self.project.id)
+
     def _handle_finish_session(self):
         if not self.project:
             return
@@ -443,46 +469,77 @@ class VideoReviewView(QWidget):
         if dlg.exec() == QDialog.Accepted:
             if dlg.choice == FinishSessionDialog.FINISH_NOW:
                 self.player.stop()
+                if self.proxy_queue:
+                    self.proxy_queue.cancel()
                 storage.save_project(self.project)
                 self.back_to_dashboard.emit()
             elif dlg.choice == FinishSessionDialog.FINISH_AND_EXPORT:
                 self.player.stop()
+                if self.proxy_queue:
+                    self.proxy_queue.cancel()
                 storage.save_project(self.project)
                 self.export_requested.emit(self.project.id)
+                self.back_to_dashboard.emit()
 
     def _on_no_compression_toggled(self, checked: bool):
         self.view_uncompressed = checked
+        if self.project:
+            self.project.view_uncompressed = checked
+            storage.save_project(self.project)
+            if not checked and not self.proxy_queue:
+                self.proxy_queue = VideoProxyQueue(self.project.id, self.project.items, self)
+                self.proxy_queue.clip_proxy_ready.connect(self._on_clip_proxy_ready)
+                self.proxy_queue.start()
         curr_pos = self.player.position()
         self._display_current_clip()
         self.player.setPosition(curr_pos)
 
     def _on_clip_proxy_ready(self, item_id: str, proxy_path: str):
         if self.current_item and self.current_item.id == item_id:
-            if not self.view_uncompressed:
+            if os.path.exists(proxy_path):
+                proxy_mb = os.path.getsize(proxy_path) / (1024 * 1024)
+                self.lbl_proxy_size.setText(f"Proxy Size: {proxy_mb:.1f} MB")
+            # Do not interrupt active video playback mid-stream
+            if not self.view_uncompressed and self.player.playbackState() != QMediaPlayer.PlayingState:
                 curr_pos = self.player.position()
                 self._display_current_clip()
                 self.player.setPosition(curr_pos)
 
     def mark_selected(self):
         """Action W: Mark current clip as Accepted / Selected and advance."""
-        if self.current_item:
+        if self.current_item and self.project:
+            self.undo_stack.append((self.project.current_index, self.current_item.status))
             self.current_item.status = "selected"
+            storage.save_project(self.project)
             self._update_decision_badge()
             self._next_clip()
 
     def mark_similar(self):
         """Action S: Mark current clip as Similar / Alternative and advance."""
-        if self.current_item:
+        if self.current_item and self.project:
+            self.undo_stack.append((self.project.current_index, self.current_item.status))
             self.current_item.status = "similar"
+            storage.save_project(self.project)
             self._update_decision_badge()
             self._next_clip()
 
     def mark_unselected(self):
         """Action X: Move current clip into the Unselected folder and advance."""
-        if self.current_item:
+        if self.current_item and self.project:
+            self.undo_stack.append((self.project.current_index, self.current_item.status))
             self.current_item.status = "unselected"
+            storage.save_project(self.project)
             self._update_decision_badge()
             self._next_clip()
+
+    def undo_last_decision(self):
+        if not self.undo_stack or not self.project:
+            return
+        idx, old_status = self.undo_stack.pop()
+        if 0 <= idx < len(self.project.items):
+            self.project.items[idx].status = old_status
+            storage.save_project(self.project)
+            self._navigate_to_index(idx)
 
     def _prev_clip(self):
         if self.project and self.project.current_index > 0:
@@ -504,6 +561,16 @@ class VideoReviewView(QWidget):
         else:
             self.btn_play.setIcon(render_icon("arrow_right", 14, COLOR_ACCENT))
 
+    @staticmethod
+    def _format_ms(ms: int) -> str:
+        total_secs = max(0, int(ms // 1000))
+        hours = total_secs // 3600
+        mins = (total_secs % 3600) // 60
+        secs = total_secs % 60
+        if hours > 0:
+            return f"{hours:02d}:{mins:02d}:{secs:02d}"
+        return f"{mins:02d}:{secs:02d}"
+
     def _on_player_position_changed(self, position_ms: int):
         dur = self.player.duration()
         if dur > 0:
@@ -511,8 +578,8 @@ class VideoReviewView(QWidget):
             self.slider_timeline.setValue(int((position_ms / dur) * 1000))
             self.slider_timeline.blockSignals(False)
 
-        curr_t = QTime(0, 0).addMSecs(position_ms).toString("mm:ss")
-        dur_t = QTime(0, 0).addMSecs(dur).toString("mm:ss")
+        curr_t = self._format_ms(position_ms)
+        dur_t = self._format_ms(dur)
         self.lbl_time.setText(f"{curr_t} / {dur_t}")
 
     def _on_player_duration_changed(self, duration_ms: int):
@@ -528,28 +595,50 @@ class VideoReviewView(QWidget):
         self.player.stop()
         if self.proxy_queue:
             self.proxy_queue.cancel()
+        if self.project:
+            storage.save_project(self.project)
         self.back_to_dashboard.emit()
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key == Qt.Key_A:
+        key_str = event.text().upper()
+
+        keep_key = config.get_key_binding("keep").upper()
+        maybe_key = config.get_key_binding("maybe", "E").upper()
+        reject_key = config.get_key_binding("reject").upper()
+        prev_key = config.get_key_binding("prev").upper()
+        next_key = config.get_key_binding("next").upper()
+
+        if event.modifiers() & Qt.ControlModifier and key == Qt.Key_Z:
+            self.undo_last_decision()
+            event.accept()
+        elif key == Qt.Key_A or (key_str and key_str == prev_key):
             self._prev_clip()
-        elif key == Qt.Key_D:
+            event.accept()
+        elif key == Qt.Key_D or (key_str and key_str == next_key):
             self._next_clip()
-        elif key == Qt.Key_W:
+            event.accept()
+        elif key == Qt.Key_W or (key_str and key_str == keep_key):
             self.mark_selected()
-        elif key == Qt.Key_S:
+            event.accept()
+        elif key == Qt.Key_S or (key_str and key_str == maybe_key):
             self.mark_similar()
-        elif key == Qt.Key_X:
+            event.accept()
+        elif key == Qt.Key_X or (key_str and key_str == reject_key and reject_key != "S"):
             self.mark_unselected()
+            event.accept()
         elif key == Qt.Key_Space:
             self._toggle_playback()
+            event.accept()
         elif key == Qt.Key_Escape:
             self._confirm_exit_to_dashboard()
+            event.accept()
         elif key == Qt.Key_Left:
             self.player.setPosition(max(0, self.player.position() - 5000))
+            event.accept()
         elif key == Qt.Key_Right:
             self.player.setPosition(min(self.player.duration(), self.player.position() + 5000))
+            event.accept()
         elif key == Qt.Key_F11:
             win = self.window()
             if hasattr(win, "toggle_fullscreen"):
