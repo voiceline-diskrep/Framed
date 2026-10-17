@@ -2,9 +2,11 @@
 
 import os
 import subprocess
+from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QProgressBar, QFrame, QFileDialog, QMessageBox, QCheckBox
+    QProgressBar, QFrame, QFileDialog, QMessageBox, QCheckBox,
+    QWidget, QScrollArea, QApplication
 )
 from PySide6.QtCore import Qt
 from loupe.config import config
@@ -33,15 +35,18 @@ class ExportDialog(QDialog):
         self._fit_to_available_screen()
 
     def _fit_to_available_screen(self):
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen:
-            avail = screen.availableGeometry()
-            target_w = min(680, max(560, avail.width() - 40))
-            target_h = min(680, max(500, avail.height() - 60))
-            self.resize(target_w, target_h)
-            x = avail.x() + (avail.width() - target_w) // 2
-            y = avail.y() + max(10, (avail.height() - target_h) // 2)
-            self.move(x, y)
+        try:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                avail = screen.availableGeometry()
+                target_w = min(680, max(560, avail.width() - 40))
+                target_h = min(680, max(500, avail.height() - 60))
+                self.resize(target_w, target_h)
+                x = avail.x() + (avail.width() - target_w) // 2
+                y = avail.y() + max(10, (avail.height() - target_h) // 2)
+                self.move(x, y)
+        except Exception:
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)

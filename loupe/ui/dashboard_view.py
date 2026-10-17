@@ -1104,7 +1104,7 @@ class ProjectCard(QFrame):
                 color: #FFFFFF;
             }}
         """)
-        self.resume_btn.clicked.connect(lambda: self.resume_clicked.emit(project.id))
+        self.resume_btn.clicked.connect(lambda checked=False, pid=project.id: self.resume_clicked.emit(pid))
         actions_layout.addWidget(self.resume_btn)
 
         self.export_btn = QPushButton("Export")
@@ -1124,7 +1124,7 @@ class ProjectCard(QFrame):
                 border-color: {COLOR_TEXT_SECONDARY};
             }}
         """)
-        self.export_btn.clicked.connect(lambda: self.export_clicked.emit(project.id))
+        self.export_btn.clicked.connect(lambda checked=False, pid=project.id: self.export_clicked.emit(pid))
         actions_layout.addWidget(self.export_btn)
 
         self.del_btn = QPushButton()
@@ -1143,7 +1143,7 @@ class ProjectCard(QFrame):
                 border-color: {COLOR_STATUS_REJECTED};
             }}
         """)
-        self.del_btn.clicked.connect(lambda: self.delete_clicked.emit(project.id))
+        self.del_btn.clicked.connect(lambda checked=False, pid=project.id: self.delete_clicked.emit(pid))
         actions_layout.addWidget(self.del_btn)
 
         main_layout.addLayout(actions_layout)

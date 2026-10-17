@@ -502,6 +502,44 @@ class TestLoupeWorkstation(unittest.TestCase):
         dash.modal_overlay.hide()
         self.assertTrue(dash.modal_overlay.isHidden())
 
+    def test_dashboard_export_action_and_dialogs(self):
+        """Verify that clicking Export on ProjectCard emits signal and opens ExportDialog/VideoExportDialog without error."""
+        from loupe.ui.dashboard_view import ProjectCard
+        from loupe.ui.export_dialog import ExportDialog
+        from loupe.ui.video_export_dialog import VideoExportDialog
+
+        # Test photo project card export button
+        photo_proj = Project(name="Portrait Session", shoot_date="2026-10-17", media_type="photo")
+        photo_card = ProjectCard(photo_proj)
+        
+        exported_ids = []
+        photo_card.export_clicked.connect(lambda pid: exported_ids.append(pid))
+        photo_card.export_btn.click()
+        self.assertEqual(exported_ids, [photo_proj.id])
+
+        # Test ExportDialog creation for photo project (ensure no QScrollArea/QApplication NameError)
+        photo_dialog = ExportDialog(photo_proj)
+        self.assertIsNotNone(photo_dialog.dest_edit)
+        self.assertIsNotNone(photo_dialog.cb_workspace)
+        self.assertTrue(photo_dialog.cb_workspace.isChecked())
+        self.assertIn("Selected", photo_dialog.preview_lbl.text())
+
+        # Test video project card export button
+        video_proj = Project(name="Commercial Shoot", shoot_date="2026-10-17", media_type="video")
+        video_card = ProjectCard(video_proj)
+
+        v_exported_ids = []
+        video_card.export_clicked.connect(lambda pid: v_exported_ids.append(pid))
+        video_card.export_btn.click()
+        self.assertEqual(v_exported_ids, [video_proj.id])
+
+        # Test VideoExportDialog creation for video project
+        video_dialog = VideoExportDialog(video_proj)
+        self.assertIsNotNone(video_dialog.edit_dir)
+        self.assertIsNotNone(video_dialog.cb_workspace)
+        self.assertTrue(video_dialog.cb_workspace.isChecked())
+        self.assertIn("Selected", video_dialog.preview_lbl.text())
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -1,3 +1,3 @@
 """Loupe — Photographer's Inspection & Culling Workstation package."""
 
-__version__ = "1.1.6"
+__version__ = "1.1.7"

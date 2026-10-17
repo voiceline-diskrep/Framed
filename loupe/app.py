@@ -131,12 +131,17 @@ class FramedMainWindow(QMainWindow):
         if not proj:
             return
 
-        if getattr(proj, "media_type", "photo") == "video":
-            dlg = VideoExportDialog(proj, self)
-            dlg.exec()
-        else:
-            dlg = ExportDialog(proj, self)
-            dlg.exec()
+        try:
+            if getattr(proj, "media_type", "photo") == "video":
+                dlg = VideoExportDialog(proj, self)
+                dlg.exec()
+            else:
+                dlg = ExportDialog(proj, self)
+                dlg.exec()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Export Error", f"Unable to open export dialog:\n{e}")
 
     def _open_settings(self):
         dlg = SettingsDialog(self)
