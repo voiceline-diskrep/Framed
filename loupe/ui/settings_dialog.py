@@ -388,50 +388,21 @@ class SettingsDialog(QDialog):
         l_gdrive.setSpacing(10)
 
         gd_head = QHBoxLayout()
-        t_gdrive = QLabel("GOOGLE DRIVE CLOUD INTEGRATION (EXPERIMENTAL)")
+        t_gdrive = QLabel("GOOGLE DRIVE CLOUD INTEGRATION")
         t_gdrive.setFont(get_mono_font(10, bold=True))
         t_gdrive.setStyleSheet(f"color: {COLOR_ACCENT};")
         gd_head.addWidget(t_gdrive)
         gd_head.addStretch()
-
-        btn_guide = QPushButton("1-Minute Setup Guide")
-        btn_guide.setFont(get_body_font(11, bold=True))
-        btn_guide.clicked.connect(self._open_gdrive_guide)
-        gd_head.addWidget(btn_guide)
         l_gdrive.addLayout(gd_head)
 
         desc_gdrive = QLabel(
-            "Connect your Google Drive account via OAuth 2.0 to import shoots from cloud folders into "
-            "your local workspace cache and export culled sessions directly back to Google Drive."
+            "Connect your Google Drive account with 1-click to import shoots into your local workspace cache "
+            "and export culled sessions directly back to Google Drive."
         )
         desc_gdrive.setFont(get_body_font(12))
         desc_gdrive.setWordWrap(True)
         desc_gdrive.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         l_gdrive.addWidget(desc_gdrive)
-
-        row_json = QHBoxLayout()
-        btn_load_json = QPushButton("Load client_secret.json...")
-        btn_load_json.setIcon(render_icon("folder", 12, COLOR_TEXT_PRIMARY))
-        btn_load_json.setFont(get_body_font(11, bold=True))
-        btn_load_json.clicked.connect(self._load_gdrive_json)
-        row_json.addWidget(btn_load_json)
-        row_json.addStretch()
-        l_gdrive.addLayout(row_json)
-
-        l_gdrive.addWidget(QLabel("OAuth Client ID:"))
-        self.edit_gdrive_client_id = QLineEdit()
-        self.edit_gdrive_client_id.setPlaceholderText("e.g. 1234567890-abcdef.apps.googleusercontent.com")
-        self.edit_gdrive_client_id.setFont(get_body_font(11))
-        self.edit_gdrive_client_id.setStyleSheet(f"padding: 6px; background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
-        l_gdrive.addWidget(self.edit_gdrive_client_id)
-
-        l_gdrive.addWidget(QLabel("OAuth Client Secret:"))
-        self.edit_gdrive_client_secret = QLineEdit()
-        self.edit_gdrive_client_secret.setEchoMode(QLineEdit.Password)
-        self.edit_gdrive_client_secret.setPlaceholderText("e.g. GOCSPX-...")
-        self.edit_gdrive_client_secret.setFont(get_body_font(11))
-        self.edit_gdrive_client_secret.setStyleSheet(f"padding: 6px; background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
-        l_gdrive.addWidget(self.edit_gdrive_client_secret)
 
         auth_row = QHBoxLayout()
         auth_row.setSpacing(10)
@@ -451,7 +422,7 @@ class SettingsDialog(QDialog):
                 font-weight: 700;
                 border: 1px solid #F59E0B;
                 border-radius: 3px;
-                padding: 6px 14px;
+                padding: 6px 16px;
             }
             QPushButton:hover {
                 background-color: #F59E0B;
@@ -466,6 +437,50 @@ class SettingsDialog(QDialog):
         auth_row.addWidget(self.btn_gdrive_disconnect)
 
         l_gdrive.addLayout(auth_row)
+
+        # Optional Collapsible Advanced Custom API Credentials
+        self.btn_toggle_custom_creds = QPushButton("⚙ Advanced: Use Custom Cloud Credentials...")
+        self.btn_toggle_custom_creds.setFont(get_body_font(10))
+        self.btn_toggle_custom_creds.setStyleSheet(f"background: transparent; border: none; color: {COLOR_TEXT_MUTED}; text-align: left; padding: 2px 0;")
+        self.btn_toggle_custom_creds.clicked.connect(self._toggle_advanced_creds)
+        l_gdrive.addWidget(self.btn_toggle_custom_creds)
+
+        self.frame_custom_creds = QFrame()
+        self.frame_custom_creds.setVisible(False)
+        fcc_layout = QVBoxLayout(self.frame_custom_creds)
+        fcc_layout.setContentsMargins(0, 4, 0, 0)
+        fcc_layout.setSpacing(6)
+
+        row_json = QHBoxLayout()
+        btn_load_json = QPushButton("Load client_secret.json...")
+        btn_load_json.setIcon(render_icon("folder", 12, COLOR_TEXT_PRIMARY))
+        btn_load_json.setFont(get_body_font(10, bold=True))
+        btn_load_json.clicked.connect(self._load_gdrive_json)
+        row_json.addWidget(btn_load_json)
+
+        btn_guide = QPushButton("Setup Guide")
+        btn_guide.setFont(get_body_font(10))
+        btn_guide.clicked.connect(self._open_gdrive_guide)
+        row_json.addWidget(btn_guide)
+        row_json.addStretch()
+        fcc_layout.addLayout(row_json)
+
+        fcc_layout.addWidget(QLabel("Custom OAuth Client ID (optional):"))
+        self.edit_gdrive_client_id = QLineEdit()
+        self.edit_gdrive_client_id.setPlaceholderText("Leave empty to use built-in Framed OAuth client")
+        self.edit_gdrive_client_id.setFont(get_body_font(11))
+        self.edit_gdrive_client_id.setStyleSheet(f"padding: 6px; background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
+        fcc_layout.addWidget(self.edit_gdrive_client_id)
+
+        fcc_layout.addWidget(QLabel("Custom OAuth Client Secret (optional):"))
+        self.edit_gdrive_client_secret = QLineEdit()
+        self.edit_gdrive_client_secret.setEchoMode(QLineEdit.Password)
+        self.edit_gdrive_client_secret.setPlaceholderText("Leave empty to use built-in Framed OAuth client")
+        self.edit_gdrive_client_secret.setFont(get_body_font(11))
+        self.edit_gdrive_client_secret.setStyleSheet(f"padding: 6px; background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
+        fcc_layout.addWidget(self.edit_gdrive_client_secret)
+
+        l_gdrive.addWidget(self.frame_custom_creds)
         form_layout.addWidget(self.card_gdrive)
 
         scroll.setWidget(container)
@@ -598,17 +613,18 @@ class SettingsDialog(QDialog):
             self.btn_gdrive_signin.setText("Sign in with Google")
             self.btn_gdrive_disconnect.setVisible(False)
 
+    def _toggle_advanced_creds(self):
+        new_vis = not self.frame_custom_creds.isVisible()
+        self.frame_custom_creds.setVisible(new_vis)
+        self.btn_toggle_custom_creds.setText(
+            "▼ Advanced: Use Custom Cloud Credentials..." if new_vis
+            else "⚙ Advanced: Use Custom Cloud Credentials..."
+        )
+
     def _on_gdrive_signin(self):
         cid = self.edit_gdrive_client_id.text().strip()
         csec = self.edit_gdrive_client_secret.text().strip()
-        if not cid or not csec:
-            QMessageBox.information(
-                self, "OAuth Credentials Required",
-                "Please load your Google Cloud 'client_secret.json' or paste your Client ID and Client Secret first.\n\n"
-                "Click '1-Minute Setup Guide' if you need help creating one."
-            )
-            return
-
+        # Save custom credentials if entered, or empty to use built-in
         config.set("gdrive_client_id", cid)
         config.set("gdrive_client_secret", csec)
 
