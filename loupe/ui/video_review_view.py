@@ -355,8 +355,32 @@ class VideoReviewView(QWidget):
         body.addWidget(telemetry_panel)
         main_layout.addLayout(body, stretch=1)
 
+    def unload_project(self):
+        """Cleanly unload active video session, stop playback, and reset UI readouts."""
+        self.player.stop()
+        if self.proxy_queue:
+            self.proxy_queue.cancel()
+            self.proxy_queue = None
+        if self.project:
+            storage.save_project(self.project)
+        self.project = None
+        self.current_item = None
+        self.undo_stack.clear()
+        self.lbl_title.setText("")
+        self.lbl_counter.setText("Clip 0 / 0")
+        self.lbl_clip_name.setText("No clip loaded")
+        self.lbl_meta_res.setText("Resolution: —")
+        self.lbl_meta_fps.setText("FPS: —")
+        self.lbl_meta_dur.setText("Duration: —")
+        self.lbl_meta_size.setText("Source Size: —")
+        self.lbl_proxy_size.setText("Proxy: —")
+        self.lbl_decision_badge.setText("UNREVIEWED")
+        self.lbl_stream_source.setText("ORIGINAL")
+
     def load_project(self, project: Project):
         """Load a video project session without preloading into RAM."""
+        self.unload_project()
+
         self.project = project
         self.undo_stack.clear()
         self.lbl_title.setText(project.name)
@@ -370,11 +394,6 @@ class VideoReviewView(QWidget):
         if not self.project.items:
             self.lbl_counter.setText("No video clips")
             return
-
-        # Stop any previous proxy queue
-        if self.proxy_queue:
-            self.proxy_queue.cancel()
-            self.proxy_queue = None
 
         # Only start background proxy generation if compressed mode is active
         if not self.view_uncompressed:
@@ -592,11 +611,7 @@ class VideoReviewView(QWidget):
             self.player.setPosition(target_ms)
 
     def _confirm_exit_to_dashboard(self):
-        self.player.stop()
-        if self.proxy_queue:
-            self.proxy_queue.cancel()
-        if self.project:
-            storage.save_project(self.project)
+        self.unload_project()
         self.back_to_dashboard.emit()
 
     def keyPressEvent(self, event):

@@ -11,14 +11,15 @@ from loupe.core.decoder import ImageDecoder
 
 class PreloadWorker(QThread):
     """Background worker for decoding photos into QImage buffers without blocking the UI."""
-    photo_loaded = Signal(int, QImage)  # index, qimage
-    progress_update = Signal(int, int, float, float, str)  # loaded_in_batch, total_in_batch, speed_mb_s, eta_sec, filename
-    batch_done = Signal(int)  # batch_index
+    photo_loaded = Signal(int, int, QImage)  # generation, index, qimage
+    progress_update = Signal(int, int, int, float, float, str)  # generation, loaded_in_batch, total_in_batch, speed_mb_s, eta_sec, filename
+    batch_done = Signal(int, int)  # generation, batch_index
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.mutex = QMutex()
         self._is_running = True
+        self.current_generation: int = 0
         self.items: List[PhotoItem] = []
         self.queue: deque = deque()
         self.current_batch_id: int = 0
@@ -31,6 +32,7 @@ class PreloadWorker(QThread):
     def stop(self):
         with QMutexLocker(self.mutex):
             self._is_running = False
+            self.current_generation += 1  # Invalidate in-flight tasks immediately
             self.queue.clear()
         self.wait(1500)
 
@@ -40,9 +42,10 @@ class PreloadWorker(QThread):
         if not self.isRunning():
             self.start()
 
-    def set_batch_tasks(self, batch_id: int, indices: List[int], items: List[PhotoItem]):
+    def set_batch_tasks(self, generation: int, batch_id: int, indices: List[int], items: List[PhotoItem]):
         self.ensure_running()
         with QMutexLocker(self.mutex):
+            self.current_generation = generation
             self.items = items
             self.current_batch_id = batch_id
             self.queue.clear()
@@ -70,22 +73,26 @@ class PreloadWorker(QThread):
                     target_idx = None
                 else:
                     target_idx = self.queue.popleft()
+                task_gen = self.current_generation
+                items_ref = self.items
 
             if target_idx is None:
                 self.msleep(30)
                 continue
 
-            if 0 <= target_idx < len(self.items):
-                item = self.items[target_idx]
+            if 0 <= target_idx < len(items_ref):
+                item = items_ref[target_idx]
                 filepath = item.primary_path
                 file_size = os.path.getsize(filepath) if filepath and os.path.exists(filepath) else 1024 * 1024
                 
                 # Decode image at full resolution
                 qimg, _ = ImageDecoder.decode_to_qimage(filepath)
-                if qimg and not qimg.isNull():
-                    self.photo_loaded.emit(target_idx, qimg)
 
                 with QMutexLocker(self.mutex):
+                    # Check if generation changed during decode or if worker was stopped
+                    if task_gen != self.current_generation or not self._is_running:
+                        continue
+
                     self.batch_completed += 1
                     self.batch_bytes_loaded += file_size
                     elapsed = max(0.01, time.perf_counter() - self.batch_start_time)
@@ -98,10 +105,13 @@ class PreloadWorker(QThread):
                     batch_id = self.current_batch_id
                     filename = os.path.basename(filepath) if filepath else ""
 
-                self.progress_update.emit(completed, total, speed_mb_s, eta_sec, filename)
+                if qimg and not qimg.isNull():
+                    self.photo_loaded.emit(task_gen, target_idx, qimg)
+
+                self.progress_update.emit(task_gen, completed, total, speed_mb_s, eta_sec, filename)
 
                 if completed >= total:
-                    self.batch_done.emit(batch_id)
+                    self.batch_done.emit(task_gen, batch_id)
 
 
 class PreloadManager(QObject):
@@ -113,6 +123,7 @@ class PreloadManager(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.session_generation: int = 0
         self.items: List[PhotoItem] = []
         self.batch_size: int = 16
         self.ram_allocation_mb: Optional[int] = None
@@ -127,12 +138,14 @@ class PreloadManager(QObject):
         self._worker.start()
 
     def cleanup(self):
+        self.session_generation += 1
         if self._worker:
             self._worker.stop()
         self._cache.clear()
         self.loaded_batches.clear()
 
     def initialize_session(self, items: List[PhotoItem], batch_size: int = 16, start_index: int = 0, ram_allocation_mb: Optional[int] = None):
+        self.session_generation += 1
         self.items = items
         self.batch_size = max(4, batch_size)
         self.ram_allocation_mb = ram_allocation_mb
@@ -167,7 +180,7 @@ class PreloadManager(QObject):
             self.batch_completed.emit(batch_index)
             return
         self._worker.ensure_running()
-        self._worker.set_batch_tasks(batch_index, needed, self.items)
+        self._worker.set_batch_tasks(self.session_generation, batch_index, needed, self.items)
 
     def check_navigation(self, target_index: int, direction: int = 1) -> Tuple[bool, int, int]:
         """
@@ -209,18 +222,48 @@ class PreloadManager(QObject):
 
         if prefetch_indices:
             batch_id = current_idx // self.batch_size
-            self._worker.set_batch_tasks(batch_id + 1000, prefetch_indices, self.items)
+            self._worker.set_batch_tasks(self.session_generation, batch_id + 1000, prefetch_indices, self.items)
 
-    def _on_photo_loaded(self, index: int, qimage: QImage):
+    def _on_photo_loaded(self, *args):
+        # Support both (generation, index, qimage) and legacy test direct calls (index, qimage)
+        if len(args) == 3:
+            gen, index, qimage = args
+            if gen != self.session_generation:
+                return
+        elif len(args) == 2:
+            index, qimage = args
+        else:
+            return
+
         self._cache[index] = qimage
         self.image_ready.emit(index, qimage)
         # Evict photos further than cache limit to respect memory limits
         self._enforce_cache_limits()
 
-    def _on_progress_update(self, completed: int, total: int, speed: float, eta: float, fname: str):
+    def _on_progress_update(self, *args):
+        # Support both (generation, completed, total, speed, eta, fname) and (completed, total, speed, eta, fname)
+        if len(args) == 6:
+            gen, completed, total, speed, eta, fname = args
+            if gen != self.session_generation:
+                return
+        elif len(args) == 5:
+            completed, total, speed, eta, fname = args
+        else:
+            return
+
         self.batch_progress.emit(completed, total, speed, eta, fname)
 
-    def _on_batch_done(self, batch_id: int):
+    def _on_batch_done(self, *args):
+        # Support both (generation, batch_id) and legacy (batch_id)
+        if len(args) == 2:
+            gen, batch_id = args
+            if gen != self.session_generation:
+                return
+        elif len(args) == 1:
+            batch_id = args[0]
+        else:
+            return
+
         self.loaded_batches.add(batch_id)
         self.batch_completed.emit(batch_id)
 

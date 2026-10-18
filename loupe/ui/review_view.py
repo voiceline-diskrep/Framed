@@ -45,7 +45,11 @@ class PhotoCanvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet("background-color: #0E0F11; border: none;")
 
-        self._zoom_factor = 1.0
+    def clear(self):
+        """Purge any current pixmap item and clear the scene completely."""
+        self.scene.clear()
+        self.pixmap_item = None
+        self.resetTransform()
 
     def set_image(self, qimage: QImage, start_zoomed_in: bool = False, zoom_level: float = 2.0):
         self.scene.clear()
@@ -315,7 +319,30 @@ class ReviewView(QWidget):
             if qimg and not qimg.isNull():
                 self.canvas.set_image(qimg, start_zoomed_in=enabled, zoom_level=zoom_level)
 
+    def unload_project(self):
+        """Completely unload active session and purge all cached buffers and display items."""
+        if self.project:
+            storage.save_project(self.project)
+        self.preload_manager.cleanup()
+        self.canvas.clear()
+        self.project = None
+        self.target_nav_index = None
+        self.is_preloading_paused = False
+        self.preload_overlay.hide()
+        self.undo_stack.clear()
+        self.project_title_lbl.setText("")
+        self.counter_lbl.setText("0 of 0")
+        self.current_filename_lbl.setText("No photos in session")
+        self.tally_lbl.setText("Kept: 0  |  Maybe: 0  |  Not Accepted: 0  |  Remaining: 0")
+        self.badge_lbl.setText("UNREVIEWED")
+        self.finish_btn.setVisible(False)
+        if hasattr(self, "stats_panel"):
+            self.stats_panel.reset_telemetry()
+
     def load_project(self, project: Project):
+        # 1. Fully unload and purge previous session
+        self.unload_project()
+
         self.project = project
         self.project_title_lbl.setText(project.name)
         self.undo_stack.clear()
@@ -345,6 +372,9 @@ class ReviewView(QWidget):
             ram_allocation_mb=ram_mb
         )
 
+        # Immediately update labels & metadata for the loaded session
+        self._display_current_photo()
+
         # Initial preload batch
         if project.items:
             batch_id = start_idx // project.batch_size
@@ -357,8 +387,6 @@ class ReviewView(QWidget):
             self.preload_overlay.set_batch_info(b_start, b_end, start_idx, total_items=len(project.items))
             self.preload_overlay.show()
             self.preload_manager.request_batch(batch_id, list(range(b_start, b_end + 1)))
-        else:
-            self._display_current_photo()
 
     def _on_preload_progress(self, completed: int, total: int, speed: float, eta: float, fname: str):
         if self.is_preloading_paused:
@@ -368,13 +396,13 @@ class ReviewView(QWidget):
         if self.is_preloading_paused:
             self.is_preloading_paused = False
             self.preload_overlay.hide()
-            if self.target_nav_index is not None:
+            if self.target_nav_index is not None and self.project:
                 self.project.current_index = self.target_nav_index
                 self.target_nav_index = None
-                self._display_current_photo()
+            self._display_current_photo()
 
     def _on_image_ready(self, index: int, qimg: QImage):
-        if self.project and index == self.project.current_index and not self.is_preloading_paused:
+        if self.project and index == self.project.current_index:
             self._render_image(qimg)
 
     def _display_current_photo(self):
@@ -383,6 +411,7 @@ class ReviewView(QWidget):
             self.current_filename_lbl.setText("No photos in session")
             self.tally_lbl.setText("Kept: 0  |  Maybe: 0  |  Not Accepted: 0  |  Remaining: 0")
             self.finish_btn.setVisible(False)
+            self.canvas.clear()
             return
 
         idx = self.project.current_index
@@ -448,10 +477,12 @@ class ReviewView(QWidget):
             item.metadata = MetadataExtractor.extract(item.primary_path)
         self.stats_panel.update_metadata(item.metadata)
 
-        # Render cached image if available
+        # Render cached image if available, else clear canvas
         qimg = self.preload_manager.get_image(idx)
-        if qimg:
+        if qimg and not qimg.isNull():
             self._render_image(qimg)
+        else:
+            self.canvas.clear()
 
     def _render_image(self, qimg: QImage):
         start_zoom = config.get("start_zoomed_in", False)
@@ -524,14 +555,13 @@ class ReviewView(QWidget):
             return
         dlg = FinishSessionDialog(self.project, self)
         if dlg.exec() == QDialog.Accepted:
+            pid = self.project.id
             if dlg.choice == FinishSessionDialog.FINISH_NOW:
-                storage.save_project(self.project)
-                self.preload_manager.cleanup()
+                self.unload_project()
                 self.back_to_dashboard.emit()
             elif dlg.choice == FinishSessionDialog.FINISH_AND_EXPORT:
-                storage.save_project(self.project)
-                self.preload_manager.cleanup()
-                self.export_requested.emit(self.project.id)
+                self.unload_project()
+                self.export_requested.emit(pid)
                 self.back_to_dashboard.emit()
 
     def undo_last_decision(self):
@@ -590,9 +620,7 @@ class ReviewView(QWidget):
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
-            # Save session state
-            storage.save_project(self.project)
-            self.preload_manager.cleanup()
+            self.unload_project()
             self.back_to_dashboard.emit()
 
     def keyPressEvent(self, event: QKeyEvent):

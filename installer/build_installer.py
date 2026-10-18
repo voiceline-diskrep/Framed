@@ -63,9 +63,10 @@ def build():
     iscc_cmd = [iscc_path, ISS_FILE]
     subprocess.check_call(iscc_cmd, cwd=os.path.join(BASE_DIR, "installer"))
 
-    setup_exe = os.path.join(OUTPUT_DIR, "Framed-Setup-v1.0.exe")
-    if not os.path.exists(setup_exe):
+    setup_exes = [os.path.join(OUTPUT_DIR, f) for f in os.listdir(OUTPUT_DIR) if f.startswith("Framed-Setup") and f.endswith(".exe")]
+    if not setup_exes:
         raise RuntimeError("Inno Setup compilation failed: Setup executable not found.")
+    setup_exe = max(setup_exes, key=os.path.getmtime)
 
     size_mb = os.path.getsize(setup_exe) / (1024 * 1024)
     sha256 = calculate_sha256(setup_exe)

@@ -745,6 +745,72 @@ class TestLoupeWorkstation(unittest.TestCase):
         from loupe.ui.theme import current_theme_id as amber_id
         self.assertEqual(amber_id, "dark_amber")
 
+    def test_session_switching_isolation(self):
+        """Verify strict session isolation when exiting to dashboard and entering another session."""
+        from loupe.app import FramedMainWindow
+        from PySide6.QtGui import QImage
+
+        sm = StorageManager()
+        photo_a_path = os.path.join(self.sample_shoot_dir, "DSC08491.JPG")
+        photo_b_path = os.path.join(self.sample_shoot_dir, "DSC08492.JPG")
+
+        proj_a = Project(
+            name="Session Alpha",
+            items=[PhotoItem(base_name="ALPHA_01", primary_path=photo_a_path, jpeg_path=photo_a_path)]
+        )
+        proj_b = Project(
+            name="Session Beta",
+            items=[PhotoItem(base_name="BETA_01", primary_path=photo_b_path, jpeg_path=photo_b_path)]
+        )
+        sm.save_project(proj_a)
+        sm.save_project(proj_b)
+
+        try:
+            main_win = FramedMainWindow()
+
+            # 1. Open Session Alpha
+            main_win._open_project(proj_a.id)
+            main_win.review_view.preload_manager.preload_batch_sync(0)
+            main_win.review_view._display_current_photo()
+
+            self.assertEqual(main_win.review_view.project.id, proj_a.id)
+            self.assertIn("ALPHA_01", main_win.review_view.current_filename_lbl.text())
+            self.assertIsNotNone(main_win.review_view.canvas.pixmap_item)
+
+            # 2. Exit to dashboard
+            main_win._show_dashboard()
+            self.assertIsNone(main_win.review_view.project)
+            self.assertIsNone(main_win.review_view.canvas.pixmap_item)
+            self.assertEqual(main_win.review_view.counter_lbl.text(), "0 of 0")
+            self.assertEqual(main_win.review_view.current_filename_lbl.text(), "No photos in session")
+
+            # 3. Open Session Beta
+            main_win._open_project(proj_b.id)
+            self.assertEqual(main_win.review_view.project.id, proj_b.id)
+            self.assertIn("BETA_01", main_win.review_view.current_filename_lbl.text())
+            self.assertNotIn("ALPHA_01", main_win.review_view.current_filename_lbl.text())
+
+            # 4. Simulate a delayed, stale worker decode signal from prior session generation
+            stale_gen = main_win.review_view.preload_manager.session_generation - 1
+            dummy_stale_img = QImage(50, 50, QImage.Format_RGB888)
+            main_win.review_view.preload_manager._on_photo_loaded(stale_gen, 0, dummy_stale_img)
+
+            # Assert stale image was dropped and not cached
+            cached = main_win.review_view.preload_manager.get_image(0)
+            if cached is not None:
+                self.assertNotEqual(cached.size(), dummy_stale_img.size())
+
+            # 5. Let Session Beta load cleanly
+            main_win.review_view.preload_manager.preload_batch_sync(0)
+            main_win.review_view._display_current_photo()
+            self.assertIsNotNone(main_win.review_view.canvas.pixmap_item)
+            self.assertIn("BETA_01", main_win.review_view.current_filename_lbl.text())
+
+            main_win.review_view.unload_project()
+        finally:
+            sm.delete_project(proj_a.id)
+            sm.delete_project(proj_b.id)
+
 
 if __name__ == "__main__":
     unittest.main()

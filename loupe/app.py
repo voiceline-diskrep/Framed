@@ -103,6 +103,8 @@ class FramedMainWindow(QMainWindow):
 
     def _open_new_session_dialog(self):
         # Switch in-app natively — no popup windows!
+        self.review_view.unload_project()
+        self.video_review_view.unload_project()
         if self.dashboard_view.current_media_mode == "video":
             self.video_setup_view.reset_form()
             self.stack.setCurrentWidget(self.video_setup_view)
@@ -117,15 +119,19 @@ class FramedMainWindow(QMainWindow):
             return
 
         if getattr(proj, "media_type", "photo") == "video":
+            self.review_view.unload_project()
             self.video_review_view.load_project(proj)
             self.stack.setCurrentWidget(self.video_review_view)
             self.video_review_view.setFocus()
         else:
+            self.video_review_view.unload_project()
             self.review_view.load_project(proj)
             self.stack.setCurrentWidget(self.review_view)
             self.review_view.setFocus()
 
     def _show_dashboard(self):
+        self.review_view.unload_project()
+        self.video_review_view.unload_project()
         self.dashboard_view.refresh()
         self.stack.setCurrentWidget(self.dashboard_view)
 

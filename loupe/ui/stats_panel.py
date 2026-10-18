@@ -236,6 +236,28 @@ class StatsPanel(QFrame):
     def update_rejected_count(self, count: int):
         self.not_accepted_btn.setText(f"Not Accepted Photos ({count})")
 
+    def reset_telemetry(self):
+        """Reset all optical telemetry readouts to clean blank state."""
+        self.camera_lbl.setText("—")
+        self.lens_lbl.setText("—")
+        shutter_val = self.shutter_box.findChild(QLabel, "val")
+        if shutter_val:
+            shutter_val.setText("—")
+        aperture_val = self.aperture_box.findChild(QLabel, "val")
+        if aperture_val:
+            aperture_val.setText("—")
+        iso_val = self.iso_box.findChild(QLabel, "val")
+        if iso_val:
+            iso_val.setText("—")
+        focal_val = self.focal_box.findChild(QLabel, "val")
+        if focal_val:
+            focal_val.setText("—")
+        self.date_taken_lbl.setText("—")
+        self.dim_lbl.setText("—")
+        self.size_lbl.setText("—")
+        self.filename_lbl.setText("—")
+        self.update_rejected_count(0)
+
     def _on_zoom_setting_changed(self):
         enabled = self.start_zoomed_cb.isChecked()
         level = self.zoom_slider.value() / 100.0
