@@ -13,32 +13,35 @@ def get_token():
             return line.split('=', 1)[1]
     raise ValueError("GitHub token not found in git credential manager")
 
-def publish_release():
+def publish_release(
+    tag: str = "v1.3.0-experimental",
+    target_branch: str = "experimental",
+    prerelease: bool = True
+):
     token = get_token()
     repo = "voiceline-diskrep/Framed"
-    tag = "v1.2.1"
-    name = "Framed v1.2.1 — Session Isolation & Workstation Polish"
+    name = "Framed v1.3.0-experimental — Google Drive Cloud Integration (OAuth 2.0)"
     body = (
-        "## What's Changed in Framed v1.2.1\n\n"
-        "### 🛠️ Session Isolation & Bug Fixes\n"
-        "* **Session Isolation Carryover**: Fixed a race condition where exiting to the dashboard and opening another session could display pictures and cached buffers from the previous session.\n"
-        "* **Incremental Session Generation Tokens**: Preload requests and background decoding workers are now tagged with generational IDs. Any in-flight decodes from an older session are immediately discarded.\n"
-        "* **Explicit Lifecycle Unload (`unload_project`)**: Review screens now completely reset the canvas scene, purge cached frames, clear the undo stack, and reset optical telemetry when switching sessions or returning to the dashboard.\n"
-        "* **Immediate Canvas Reset**: The canvas is cleared immediately when loading new sessions to prevent stale preview retention during background preloads.\n\n"
-        "### 🎨 Workstation Themes & Enhancements (v1.2.0)\n"
-        "* **6 Clean Descriptive Themes**: Dark Amber, OLED, Dark Blue, Dark Green, Neutral Gray, and Light.\n"
-        "* **Quick Theme Switcher**: Available directly in the Dashboard header and Settings dialog.\n"
-        "* **RAM Scaling Beyond 32 Photos**: Smooth multi-gigabyte memory buffer preloading calibrated to system RAM.\n\n"
+        "## 🧪 Framed v1.3.0-experimental (Pre-Release)\n\n"
+        "> **Note:** This is an **Experimental Pre-Release** build on the `experimental` branch. "
+        "Stable users on `v1.2.1` remain on the stable update channel unless **Enable Experimental Mode** is turned on in **Settings → Preferences**.\n\n"
+        "### ☁️ In-App Google Drive API (OAuth 2.0) Integration\n"
+        "* **Experimental Mode & Beta Channel Toggle**: New toggle in **Preferences** that unlocks experimental features and switches the in-app auto-updater to include GitHub Pre-releases.\n"
+        "* **In-App Google OAuth 2.0 Sign-In**: Load your Google Cloud `client_secret.json` (or paste Client ID & Secret) with a built-in **1-Minute Setup Guide**, and click **Sign in with Google** to authenticate via browser PKCE loopback.\n"
+        "* **Google Drive Cloud Import (Photo & Video)**: Click **Google Drive...** in New Session Setup to browse your Google Drive folders (or paste a shared Drive folder link/ID) and download files into a local workspace cache for zero-lag culling.\n"
+        "* **Google Drive Cloud Export (Photo & Video)**: Switch between **Local Disk** and **Google Drive (Experimental)** in the Export dialog. Includes category checkboxes (`Selected`, `Maybe`/`Similar`, and `Edited Result` checked by default; `Unselected` unchecked by default to save cloud storage).\n"
+        "* **Full Real-Time Telemetry Progress Bar**: Both cloud downloads and resumable chunked uploads display live percentage (`0–100%`), file counter (`12 / 45 files`), transfer speed (`MB/s`), `ETA`, current filename, `Cancel` button, and an **Open in Google Drive** button upon completion.\n\n"
         "### 📦 Downloads\n"
-        "* **Windows Installer**: `Framed-Setup-v1.2.1.exe`\n"
+        f"* **Windows Experimental Installer**: `Framed-Setup-{tag}.exe`\n"
     )
 
-    asset_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "installer", "Output", "Framed-Setup-v1.2.1.exe"))
+    exe_name = f"Framed-Setup-{tag}.exe"
+    asset_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "installer", "Output", exe_name))
     if not os.path.exists(asset_path):
         raise FileNotFoundError(f"Installer binary not found at {asset_path}")
 
     asset_size = os.path.getsize(asset_path)
-    print(f"Publishing release {tag} ({asset_size / (1024*1024):.2f} MB)...")
+    print(f"Publishing {'pre-release' if prerelease else 'release'} {tag} ({asset_size / (1024*1024):.2f} MB)...")
 
     # Step 1: Check if release for tag already exists
     release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
@@ -64,11 +67,11 @@ def publish_release():
         create_url = f"https://api.github.com/repos/{repo}/releases"
         payload = json.dumps({
             "tag_name": tag,
-            "target_commitish": "master",
+            "target_commitish": target_branch,
             "name": name,
             "body": body,
             "draft": False,
-            "prerelease": False
+            "prerelease": prerelease
         }).encode('utf-8')
         
         req = urllib.request.Request(create_url, data=payload, headers={
@@ -81,12 +84,12 @@ def publish_release():
             release_data = json.loads(resp.read().decode())
             print(f"Release created successfully! (ID: {release_data['id']})")
 
-    upload_url_template = release_data['upload_url'] # e.g. https://uploads.github.com/repos/.../assets{?name,label}
-    upload_url = upload_url_template.split('{')[0] + f"?name=Framed-Setup-v1.2.1.exe"
+    upload_url_template = release_data['upload_url']
+    upload_url = upload_url_template.split('{')[0] + f"?name={exe_name}"
 
     # Step 3: Check if asset already uploaded
     for asset in release_data.get('assets', []):
-        if asset['name'] == 'Framed-Setup-v1.2.1.exe':
+        if asset['name'] == exe_name:
             print(f"Deleting existing asset {asset['name']} (ID: {asset['id']}) to re-upload...")
             del_req = urllib.request.Request(asset['url'], headers={
                 'Authorization': f'Bearer {token}',
@@ -109,14 +112,14 @@ def publish_release():
         'Content-Length': str(len(file_data))
     })
 
-    with urllib.request.urlopen(upload_req) as resp:
+    with urllib.request.urlopen(upload_req, timeout=300) as resp:
         asset_info = json.loads(resp.read().decode())
         print(f"Asset uploaded successfully! Download URL: {asset_info['browser_download_url']}")
 
     print("\n" + "=" * 60)
-    print("  GITHUB RELEASE PUBLISHED SUCCESSFULLY!")
+    print("  GITHUB PRE-RELEASE PUBLISHED SUCCESSFULLY!")
     print(f"  Release: {release_data['html_url']}")
-    print(f"  Version: {tag}")
+    print(f"  Version: {tag} (prerelease={prerelease})")
     print("=" * 60)
 
 if __name__ == '__main__':

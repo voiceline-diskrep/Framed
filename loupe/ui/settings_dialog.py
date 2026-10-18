@@ -11,13 +11,15 @@ from loupe.config import config, get_total_system_ram_gb
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS, COLOR_TEXT_PRIMARY,
-    COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED, COLOR_ACCENT,
-    get_display_font, get_body_font, get_mono_font,
+    COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED, COLOR_ACCENT, COLOR_STATUS_KEPT,
+    COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font,
     THEMES, THEME_ALIASES, current_theme_id, apply_theme
 )
 from loupe.ui.icons import render_icon
 from loupe.core.updater import CURRENT_VERSION, UpdateCheckWorker
 from loupe.ui.update_dialog import UpdateDialog
+from loupe.core.gdrive import GoogleDriveClient, GDriveAuthWorker, load_client_secrets_file
+from loupe.ui.gdrive_dialog import GDriveGuideDialog
 
 class KeyBindingEdit(QLineEdit):
     """Input widget that captures single key presses for shortcuts."""
@@ -354,6 +356,118 @@ class SettingsDialog(QDialog):
 
         form_layout.addWidget(card_update)
 
+        # Section 7: Experimental Mode & Pre-Release Channel
+        card_exp = self._create_card()
+        l_exp = QVBoxLayout(card_exp)
+        l_exp.setSpacing(10)
+
+        t_exp = QLabel("EXPERIMENTAL MODE & BETA CHANNEL")
+        t_exp.setFont(get_mono_font(10, bold=True))
+        t_exp.setStyleSheet(f"color: {COLOR_ACCENT};")
+        l_exp.addWidget(t_exp)
+
+        desc_exp = QLabel(
+            "Enable experimental workstation features (such as direct Google Drive Cloud Import/Export) "
+            "and receive GitHub Pre-release updates."
+        )
+        desc_exp.setFont(get_body_font(12))
+        desc_exp.setWordWrap(True)
+        desc_exp.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        l_exp.addWidget(desc_exp)
+
+        self.cb_experimental = QCheckBox("Enable Experimental Mode (Unlocks Google Drive Cloud & Pre-Release Channel)")
+        self.cb_experimental.setFont(get_body_font(12, bold=True))
+        self.cb_experimental.toggled.connect(self._on_experimental_toggled)
+        l_exp.addWidget(self.cb_experimental)
+
+        form_layout.addWidget(card_exp)
+
+        # Section 8: Google Drive Cloud Integration (OAuth 2.0) — Visible when Experimental Mode is ON
+        self.card_gdrive = self._create_card()
+        l_gdrive = QVBoxLayout(self.card_gdrive)
+        l_gdrive.setSpacing(10)
+
+        gd_head = QHBoxLayout()
+        t_gdrive = QLabel("GOOGLE DRIVE CLOUD INTEGRATION (EXPERIMENTAL)")
+        t_gdrive.setFont(get_mono_font(10, bold=True))
+        t_gdrive.setStyleSheet(f"color: {COLOR_ACCENT};")
+        gd_head.addWidget(t_gdrive)
+        gd_head.addStretch()
+
+        btn_guide = QPushButton("1-Minute Setup Guide")
+        btn_guide.setFont(get_body_font(11, bold=True))
+        btn_guide.clicked.connect(self._open_gdrive_guide)
+        gd_head.addWidget(btn_guide)
+        l_gdrive.addLayout(gd_head)
+
+        desc_gdrive = QLabel(
+            "Connect your Google Drive account via OAuth 2.0 to import shoots from cloud folders into "
+            "your local workspace cache and export culled sessions directly back to Google Drive."
+        )
+        desc_gdrive.setFont(get_body_font(12))
+        desc_gdrive.setWordWrap(True)
+        desc_gdrive.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        l_gdrive.addWidget(desc_gdrive)
+
+        row_json = QHBoxLayout()
+        btn_load_json = QPushButton("Load client_secret.json...")
+        btn_load_json.setIcon(render_icon("folder", 12, COLOR_TEXT_PRIMARY))
+        btn_load_json.setFont(get_body_font(11, bold=True))
+        btn_load_json.clicked.connect(self._load_gdrive_json)
+        row_json.addWidget(btn_load_json)
+        row_json.addStretch()
+        l_gdrive.addLayout(row_json)
+
+        l_gdrive.addWidget(QLabel("OAuth Client ID:"))
+        self.edit_gdrive_client_id = QLineEdit()
+        self.edit_gdrive_client_id.setPlaceholderText("e.g. 1234567890-abcdef.apps.googleusercontent.com")
+        self.edit_gdrive_client_id.setFont(get_body_font(11))
+        self.edit_gdrive_client_id.setStyleSheet(f"padding: 6px; background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
+        l_gdrive.addWidget(self.edit_gdrive_client_id)
+
+        l_gdrive.addWidget(QLabel("OAuth Client Secret:"))
+        self.edit_gdrive_client_secret = QLineEdit()
+        self.edit_gdrive_client_secret.setEchoMode(QLineEdit.Password)
+        self.edit_gdrive_client_secret.setPlaceholderText("e.g. GOCSPX-...")
+        self.edit_gdrive_client_secret.setFont(get_body_font(11))
+        self.edit_gdrive_client_secret.setStyleSheet(f"padding: 6px; background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT};")
+        l_gdrive.addWidget(self.edit_gdrive_client_secret)
+
+        auth_row = QHBoxLayout()
+        auth_row.setSpacing(10)
+
+        self.lbl_gdrive_status = QLabel("Not signed in")
+        self.lbl_gdrive_status.setFont(get_mono_font(11, bold=True))
+        self.lbl_gdrive_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        auth_row.addWidget(self.lbl_gdrive_status, stretch=1)
+
+        self.btn_gdrive_signin = QPushButton("Sign in with Google")
+        self.btn_gdrive_signin.setIcon(render_icon("cloud", 13, "#FFFFFF"))
+        self.btn_gdrive_signin.setFont(get_body_font(11, bold=True))
+        self.btn_gdrive_signin.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: #FFFFFF;
+                font-weight: 700;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+                padding: 6px 14px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+        """)
+        self.btn_gdrive_signin.clicked.connect(self._on_gdrive_signin)
+        auth_row.addWidget(self.btn_gdrive_signin)
+
+        self.btn_gdrive_disconnect = QPushButton("Disconnect")
+        self.btn_gdrive_disconnect.setFont(get_body_font(11))
+        self.btn_gdrive_disconnect.clicked.connect(self._on_gdrive_disconnect)
+        auth_row.addWidget(self.btn_gdrive_disconnect)
+
+        l_gdrive.addLayout(auth_row)
+        form_layout.addWidget(self.card_gdrive)
+
         scroll.setWidget(container)
         main_layout.addWidget(scroll, stretch=1)
 
@@ -435,6 +549,94 @@ class SettingsDialog(QDialog):
         self.cb_auto_update.setChecked(config.get("auto_check_updates", True))
         self.edit_update_url.setText(config.get("update_manifest_url", ""))
 
+        exp_mode = bool(config.get("experimental_mode", False))
+        self.cb_experimental.setChecked(exp_mode)
+        self.card_gdrive.setVisible(exp_mode)
+
+        self.edit_gdrive_client_id.setText(config.get("gdrive_client_id", ""))
+        self.edit_gdrive_client_secret.setText(config.get("gdrive_client_secret", ""))
+        self._refresh_gdrive_auth_status()
+
+    def _on_experimental_toggled(self, checked: bool):
+        self.card_gdrive.setVisible(checked)
+        config.set("experimental_mode", checked)
+
+    def _open_gdrive_guide(self):
+        dlg = GDriveGuideDialog(self)
+        dlg.exec()
+
+    def _load_gdrive_json(self):
+        f_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Google Cloud OAuth client_secret.json", "", "JSON Files (*.json)"
+        )
+        if not f_path:
+            return
+        try:
+            cid, csec = load_client_secrets_file(f_path)
+            self.edit_gdrive_client_id.setText(cid)
+            self.edit_gdrive_client_secret.setText(csec)
+            config.set("gdrive_client_id", cid)
+            config.set("gdrive_client_secret", csec)
+            QMessageBox.information(
+                self, "Credentials Loaded",
+                "Successfully loaded Google OAuth 2.0 Client ID and Secret!\nClick 'Sign in with Google' to connect your account."
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Invalid Credentials File", str(e))
+
+    def _refresh_gdrive_auth_status(self):
+        client = GoogleDriveClient()
+        if client.is_authenticated():
+            email = client.get_user_email() or "Connected Account"
+            self.lbl_gdrive_status.setText(f"● Connected: {email}")
+            self.lbl_gdrive_status.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+            self.btn_gdrive_signin.setText("Reconnect Google")
+            self.btn_gdrive_disconnect.setVisible(True)
+        else:
+            self.lbl_gdrive_status.setText("Not signed in to Google Drive")
+            self.lbl_gdrive_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+            self.btn_gdrive_signin.setText("Sign in with Google")
+            self.btn_gdrive_disconnect.setVisible(False)
+
+    def _on_gdrive_signin(self):
+        cid = self.edit_gdrive_client_id.text().strip()
+        csec = self.edit_gdrive_client_secret.text().strip()
+        if not cid or not csec:
+            QMessageBox.information(
+                self, "OAuth Credentials Required",
+                "Please load your Google Cloud 'client_secret.json' or paste your Client ID and Client Secret first.\n\n"
+                "Click '1-Minute Setup Guide' if you need help creating one."
+            )
+            return
+
+        config.set("gdrive_client_id", cid)
+        config.set("gdrive_client_secret", csec)
+
+        self.btn_gdrive_signin.setEnabled(False)
+        self.lbl_gdrive_status.setText("Waiting for Google Sign-In in your browser...")
+        self.lbl_gdrive_status.setStyleSheet(f"color: {COLOR_ACCENT};")
+
+        self.gdrive_auth_worker = GDriveAuthWorker(parent=self)
+        self.gdrive_auth_worker.auth_finished.connect(self._on_gdrive_auth_finished)
+        self.gdrive_auth_worker.start()
+
+    def _on_gdrive_auth_finished(self, success: bool, email: str, error_msg: str):
+        self.btn_gdrive_signin.setEnabled(True)
+        if success:
+            self._refresh_gdrive_auth_status()
+            QMessageBox.information(
+                self, "Google Drive Connected",
+                f"Successfully connected Google Drive account: {email}"
+            )
+        else:
+            self.lbl_gdrive_status.setText("Sign-in failed or cancelled")
+            self.lbl_gdrive_status.setStyleSheet(f"color: {COLOR_STATUS_REJECTED};")
+            QMessageBox.warning(self, "Google Sign-In Error", f"Could not complete Google Sign-In:\n{error_msg}")
+
+    def _on_gdrive_disconnect(self):
+        GoogleDriveClient().disconnect()
+        self._refresh_gdrive_auth_status()
+
     def _browse_export_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Select Default Export Location")
         if d:
@@ -456,6 +658,9 @@ class SettingsDialog(QDialog):
 
         config.set("auto_check_updates", self.cb_auto_update.isChecked())
         config.set("update_manifest_url", self.edit_update_url.text().strip())
+        config.set("experimental_mode", self.cb_experimental.isChecked())
+        config.set("gdrive_client_id", self.edit_gdrive_client_id.text().strip())
+        config.set("gdrive_client_secret", self.edit_gdrive_client_secret.text().strip())
 
         self.accept()
 
@@ -470,7 +675,9 @@ class SettingsDialog(QDialog):
 
         self.btn_check_update.setEnabled(False)
         self.lbl_update_status.setText("Checking for updates...")
-        self.update_checker = UpdateCheckWorker(url, self)
+        self.update_checker = UpdateCheckWorker(
+            url, self, include_prereleases=self.cb_experimental.isChecked()
+        )
         self.update_checker.check_finished.connect(self._on_manual_check_result)
         self.update_checker.start()
 

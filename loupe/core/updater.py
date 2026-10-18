@@ -7,13 +7,14 @@ import urllib.request
 import urllib.error
 import tempfile
 import subprocess
+import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 from loupe.config import config
 
-CURRENT_VERSION = "1.2.1"
+CURRENT_VERSION = "1.3.0-experimental"
 
 @dataclass
 class UpdateInfo:
@@ -21,16 +22,18 @@ class UpdateInfo:
     download_url: str
     release_notes: str = ""
     pub_date: str = ""
+    is_prerelease: bool = False
 
 
 def parse_version_tuple(v_str: str) -> Tuple[int, ...]:
-    """Parse version string like 'v1.2.3' or '1.2.0' into numeric tuple (1, 2, 0)."""
+    """Parse version string like 'v1.2.3' or 'v1.3.0-experimental' into numeric tuple (1, 3, 0)."""
     cleaned = v_str.strip().lstrip("vV")
     parts = []
     for p in cleaned.split("."):
-        try:
-            parts.append(int(p))
-        except ValueError:
+        m = re.match(r"(\d+)", p.strip())
+        if m:
+            parts.append(int(m.group(1)))
+        else:
             parts.append(0)
     return tuple(parts) if parts else (0,)
 
@@ -40,27 +43,49 @@ def is_newer_version(remote_ver: str, local_ver: str = CURRENT_VERSION) -> bool:
     return parse_version_tuple(remote_ver) > parse_version_tuple(local_ver)
 
 
-def fetch_update_info(manifest_url: str) -> UpdateInfo:
+def fetch_update_info(manifest_url: str, include_prereleases: Optional[bool] = None) -> UpdateInfo:
     """Fetch update information from a JSON URL, GitHub Releases API, or local file."""
     if not manifest_url:
         raise ValueError("No update manifest URL configured.")
 
+    if include_prereleases is None:
+        include_prereleases = bool(config.get("experimental_mode", False))
+
+    effective_url = manifest_url.strip()
+    if include_prereleases and effective_url.endswith("/releases/latest"):
+        effective_url = effective_url[:-len("/latest")]
+
     # Support local testing file path
-    if os.path.exists(manifest_url):
-        with open(manifest_url, "r", encoding="utf-8") as f:
+    if os.path.exists(effective_url):
+        with open(effective_url, "r", encoding="utf-8") as f:
             data = json.load(f)
     else:
         req = urllib.request.Request(
-            manifest_url,
+            effective_url,
             headers={"User-Agent": f"Framed-Workstation/{CURRENT_VERSION}"}
         )
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode("utf-8"))
 
+    # If GitHub /releases endpoint returns a list of releases (used when experimental/pre-releases enabled)
+    if isinstance(data, list):
+        chosen = None
+        for rel in data:
+            if not isinstance(rel, dict) or rel.get("draft", False):
+                continue
+            if not include_prereleases and rel.get("prerelease", False):
+                continue
+            chosen = rel
+            break
+        if not chosen:
+            raise ValueError("No matching releases found in repository.")
+        data = chosen
+
     # GitHub Releases API format handling
-    if "tag_name" in data and "assets" in data:
+    if isinstance(data, dict) and "tag_name" in data and "assets" in data:
         ver = data.get("tag_name", "").lstrip("vV")
         notes = data.get("body", "No release notes provided.")
+        is_pre = bool(data.get("prerelease", False))
         download_url = ""
         for asset in data.get("assets", []):
             name = asset.get("name", "").lower()
@@ -69,34 +94,36 @@ def fetch_update_info(manifest_url: str) -> UpdateInfo:
                 break
         if not download_url:
             raise ValueError("No executable installer (.exe) found in release assets.")
-        return UpdateInfo(version=ver, download_url=download_url, release_notes=notes)
+        return UpdateInfo(version=ver, download_url=download_url, release_notes=notes, is_prerelease=is_pre)
 
     # Standard Framed manifest format: { "version": "1.1.0", "download_url": "...", "release_notes": "..." }
     ver = data.get("version", "")
     dl_url = data.get("download_url", "")
     notes = data.get("release_notes", "")
     date = data.get("release_date", "")
+    is_pre = bool(data.get("prerelease", False))
 
     if not ver or not dl_url:
         raise ValueError("Invalid manifest: 'version' and 'download_url' are required.")
 
-    return UpdateInfo(version=ver, download_url=dl_url, release_notes=notes, pub_date=date)
+    return UpdateInfo(version=ver, download_url=dl_url, release_notes=notes, pub_date=date, is_prerelease=is_pre)
 
 
 class UpdateCheckWorker(QThread):
     """Background worker to check for updates without freezing the GUI."""
     check_finished = Signal(bool, object, str)  # (has_update, UpdateInfo or None, error_message)
 
-    def __init__(self, manifest_url: str, parent=None):
+    def __init__(self, manifest_url: str, parent=None, include_prereleases: Optional[bool] = None):
         super().__init__(parent)
         self.manifest_url = manifest_url.strip()
+        self.include_prereleases = include_prereleases
 
     def run(self):
         if not self.manifest_url:
             self.check_finished.emit(False, None, "No update feed URL configured.")
             return
         try:
-            info = fetch_update_info(self.manifest_url)
+            info = fetch_update_info(self.manifest_url, include_prereleases=self.include_prereleases)
             has_update = is_newer_version(info.version, CURRENT_VERSION)
             self.check_finished.emit(has_update, info, "")
         except Exception as e:

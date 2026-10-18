@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDateEdit, QRadioButton, QButtonGroup, QScrollArea, QApplication
 )
 from PySide6.QtCore import Qt, QDate, Signal
+from loupe.config import config
 from loupe.models import Project, PhotoItem
 from loupe.storage import storage
 from loupe.core.video_engine import VIDEO_EXTENSIONS
@@ -164,6 +165,28 @@ class VideoSessionView(QWidget):
         """)
         btn_browse.clicked.connect(self._browse)
         r_dir.addWidget(btn_browse)
+
+        self.gdrive_btn = QPushButton("Google Drive...")
+        self.gdrive_btn.setFont(get_body_font(12, bold=True))
+        self.gdrive_btn.setIcon(render_icon("cloud", 14, COLOR_ACCENT))
+        self.gdrive_btn.setMinimumHeight(40)
+        self.gdrive_btn.setToolTip("Experimental: Import video clips from Google Drive into local cache")
+        self.gdrive_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_ACCENT};
+                border-radius: 3px;
+                color: {COLOR_ACCENT};
+            }}
+            QPushButton:hover {{
+                background-color: #2D2214;
+                color: #FFFFFF;
+            }}
+        """)
+        self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+        self.gdrive_btn.clicked.connect(self._import_from_gdrive)
+        r_dir.addWidget(self.gdrive_btn)
         cd_layout.addLayout(r_dir)
 
         self.lbl_scan_status = QLabel("No directory selected.")
@@ -399,6 +422,34 @@ class VideoSessionView(QWidget):
             self.edit_dir.setText(d)
             self._scan_directory(d)
 
+    def _import_from_gdrive(self):
+        from loupe.core.gdrive import GoogleDriveClient
+        from loupe.ui.gdrive_dialog import GDriveBrowserDialog
+        from loupe.ui.settings_dialog import SettingsDialog
+
+        client = GoogleDriveClient()
+        if not client.is_authenticated():
+            ans = QMessageBox.question(
+                self,
+                "Connect Google Drive",
+                "You need to sign in to Google Drive in Preferences before importing cloud folders.\n\n"
+                "Open Preferences now?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if ans == QMessageBox.Yes:
+                s_dlg = SettingsDialog(self)
+                s_dlg.exec()
+                self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+            if not GoogleDriveClient().is_authenticated():
+                return
+
+        dlg = GDriveBrowserDialog(mode="import", media_mode="video", parent=self)
+        if dlg.exec() == QDialog.Accepted and dlg.downloaded_local_dir:
+            self.edit_dir.setText(dlg.downloaded_local_dir)
+            if dlg.selected_folder_name:
+                self.edit_name.setText(dlg.selected_folder_name)
+            self._scan_directory(dlg.downloaded_local_dir)
+
     def _scan_directory(self, folder_path: str):
         self.scanned_items.clear()
         if not os.path.exists(folder_path):
@@ -449,6 +500,7 @@ class VideoSessionView(QWidget):
     def reset_form(self):
         """Reset form fields when starting fresh."""
         self._populate_folders()
+        self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
         self.edit_dir.blockSignals(True)
         self.edit_dir.setText("")
         self.edit_dir.blockSignals(False)

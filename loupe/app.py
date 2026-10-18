@@ -28,7 +28,7 @@ from loupe.ui.tour_overlay import TourDialog
 class FramedMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Framed — Photographer & Videographer Workstation")
+        self._refresh_window_title()
         self.resize(1280, 840)
         self.setMinimumSize(960, 640)
 
@@ -61,11 +61,15 @@ class FramedMainWindow(QMainWindow):
             tour = TourDialog(self)
             tour.show()
 
-        # Check for software updates in background if enabled
+        self.bg_update_worker = None
+        # Check for software updates in background if enabled (only when running main app, not headless tests)
         if config.get("auto_check_updates", True) and config.get("update_manifest_url", ""):
-            self._check_for_updates_background()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(500, self._check_for_updates_background)
 
     def _check_for_updates_background(self):
+        if not self.isVisible():
+            return
         url = config.get("update_manifest_url", "").strip()
         if url:
             from loupe.core.updater import UpdateCheckWorker
@@ -74,7 +78,7 @@ class FramedMainWindow(QMainWindow):
             self.bg_update_worker.start()
 
     def _on_background_update_check_result(self, has_update: bool, info, error_msg: str):
-        if has_update and info:
+        if has_update and info and self.isVisible():
             from loupe.ui.update_dialog import UpdateDialog
             dlg = UpdateDialog(info, self)
             dlg.exec()
@@ -152,11 +156,23 @@ class FramedMainWindow(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Export Error", f"Unable to open export dialog:\n{e}")
 
+    def _refresh_window_title(self):
+        if config.get("experimental_mode", False):
+            self.setWindowTitle("Framed [EXPERIMENTAL] — Photographer & Videographer Workstation")
+        else:
+            self.setWindowTitle("Framed — Photographer & Videographer Workstation")
+
     def _open_settings(self):
         dlg = SettingsDialog(self)
         dlg.restart_tour_requested.connect(self._restart_tour)
         dlg.exec()
+        self._refresh_window_title()
         self.review_view.refresh_key_bindings()
+        exp_on = bool(config.get("experimental_mode", False))
+        if hasattr(self.photo_setup_view, "gdrive_btn"):
+            self.photo_setup_view.gdrive_btn.setVisible(exp_on)
+        if hasattr(self.video_setup_view, "gdrive_btn"):
+            self.video_setup_view.gdrive_btn.setVisible(exp_on)
 
     def _restart_tour(self):
         tour = TourDialog(self)

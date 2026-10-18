@@ -811,9 +811,142 @@ class TestLoupeWorkstation(unittest.TestCase):
             sm.delete_project(proj_a.id)
             sm.delete_project(proj_b.id)
 
+    def test_experimental_mode_and_gdrive_integration(self):
+        """Verify Experimental Mode toggle, pre-release updater channel, Google Drive OAuth config, and Cloud Import/Export UI."""
+        import json
+        from loupe.core.gdrive import (
+            parse_gdrive_folder_id, load_client_secrets_file, format_eta, GoogleDriveClient
+        )
+        from loupe.core.updater import parse_version_tuple, fetch_update_info
+        from loupe.ui.settings_dialog import SettingsDialog
+        from loupe.ui.session_setup_dialog import SessionSetupView
+        from loupe.ui.video_session_dialog import VideoSessionView
+        from loupe.ui.export_dialog import ExportDialog
+        from loupe.ui.video_export_dialog import VideoExportDialog
+
+        # 1. Test Google Drive URL & Folder ID parser
+        self.assertEqual(parse_gdrive_folder_id(""), "root")
+        self.assertEqual(parse_gdrive_folder_id("My Drive"), "root")
+        self.assertEqual(
+            parse_gdrive_folder_id("https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz?usp=sharing"),
+            "1AbCdEfGhIjKlMnOpQrStUvWxYz"
+        )
+        self.assertEqual(
+            parse_gdrive_folder_id("https://drive.google.com/drive/u/0/folders/1ZyXwVuTsRqPoNmLkJiHgFeDcBa"),
+            "1ZyXwVuTsRqPoNmLkJiHgFeDcBa"
+        )
+        self.assertEqual(
+            parse_gdrive_folder_id("https://drive.google.com/open?id=1FolderIdQueryParam999"),
+            "1FolderIdQueryParam999"
+        )
+        self.assertEqual(parse_gdrive_folder_id("1DirectFolderIdString12345"), "1DirectFolderIdString12345")
+        self.assertEqual(format_eta(45), "45s")
+        self.assertEqual(format_eta(125), "2m 05s")
+
+        # 2. Test loading Google Cloud client_secret.json
+        secret_file = os.path.join(self.temp_dir, "client_secret_test.json")
+        with open(secret_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "installed": {
+                    "client_id": "test-client-id-123.apps.googleusercontent.com",
+                    "client_secret": "GOCSPX-test-secret-xyz"
+                }
+            }, f)
+        cid, csec = load_client_secrets_file(secret_file)
+        self.assertEqual(cid, "test-client-id-123.apps.googleusercontent.com")
+        self.assertEqual(csec, "GOCSPX-test-secret-xyz")
+
+        # 3. Test pre-release version parsing and GitHub Releases list filtering
+        self.assertEqual(parse_version_tuple("v1.3.0-experimental"), (1, 3, 0))
+        releases_feed = os.path.join(self.temp_dir, "releases_list.json")
+        with open(releases_feed, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "tag_name": "v1.3.0-experimental",
+                    "prerelease": True,
+                    "draft": False,
+                    "body": "Experimental Google Drive build",
+                    "assets": [{"name": "Framed-Setup-v1.3.0-experimental.exe", "browser_download_url": "https://example.com/exp.exe"}]
+                },
+                {
+                    "tag_name": "v1.2.1",
+                    "prerelease": False,
+                    "draft": False,
+                    "body": "Stable build",
+                    "assets": [{"name": "Framed-Setup-v1.2.1.exe", "browser_download_url": "https://example.com/stable.exe"}]
+                }
+            ], f)
+
+        info_stable = fetch_update_info(releases_feed, include_prereleases=False)
+        self.assertEqual(info_stable.version, "1.2.1")
+        self.assertFalse(info_stable.is_prerelease)
+
+        info_exp = fetch_update_info(releases_feed, include_prereleases=True)
+        self.assertEqual(info_exp.version, "1.3.0-experimental")
+        self.assertTrue(info_exp.is_prerelease)
+
+        # 4. Test Experimental Mode UI toggling in Settings, Session Setup, and Export Dialogs
+        prev_exp = config.get("experimental_mode", False)
+        try:
+            config.set("experimental_mode", False)
+            s_dlg = SettingsDialog()
+            self.assertFalse(s_dlg.cb_experimental.isChecked())
+            self.assertTrue(s_dlg.card_gdrive.isHidden())
+
+            # Toggle Experimental Mode ON
+            s_dlg.cb_experimental.setChecked(True)
+            self.assertFalse(s_dlg.card_gdrive.isHidden())
+            self.assertTrue(config.get("experimental_mode"))
+
+            p_setup = SessionSetupView()
+            self.assertFalse(p_setup.gdrive_btn.isHidden())
+            v_setup = VideoSessionView()
+            self.assertFalse(v_setup.gdrive_btn.isHidden())
+
+            # Test ExportDialog Google Drive mode & default category checkboxes
+            proj = Project(
+                name="Cloud Export Shoot",
+                items=[
+                    PhotoItem(base_name="IMG_1", primary_path="1.jpg", status="kept"),
+                    PhotoItem(base_name="IMG_2", primary_path="2.jpg", status="maybe"),
+                    PhotoItem(base_name="IMG_3", primary_path="3.jpg", status="rejected"),
+                ]
+            )
+            exp_dlg = ExportDialog(proj)
+            self.assertFalse(exp_dlg.mode_frame.isHidden())
+            self.assertTrue(exp_dlg.rb_dest_local.isChecked())
+            self.assertTrue(exp_dlg.gdrive_cat_card.isHidden())
+
+            # Switch to Google Drive export mode
+            exp_dlg.rb_dest_gdrive.setChecked(True)
+            self.assertFalse(exp_dlg.gdrive_cat_card.isHidden())
+            self.assertTrue(exp_dlg.cb_up_selected.isChecked())
+            self.assertTrue(exp_dlg.cb_up_maybe.isChecked())
+            self.assertTrue(exp_dlg.cb_up_edited.isChecked())
+            self.assertFalse(exp_dlg.cb_up_unselected.isChecked())
+            self.assertIn("Google Drive", exp_dlg.preview_lbl.text())
+            self.assertNotIn("Unselected/", exp_dlg.preview_lbl.text())
+
+            # Checking Unselected adds it back to preview
+            exp_dlg.cb_up_unselected.setChecked(True)
+            self.assertIn("Unselected/", exp_dlg.preview_lbl.text())
+
+            # Test VideoExportDialog Google Drive mode
+            v_proj = Project(name="Cloud Video Shoot", media_type="video")
+            v_exp_dlg = VideoExportDialog(v_proj)
+            self.assertFalse(v_exp_dlg.mode_frame.isHidden())
+            v_exp_dlg.rb_dest_gdrive.setChecked(True)
+            self.assertFalse(v_exp_dlg.gdrive_cat_card.isHidden())
+            self.assertTrue(v_exp_dlg.cb_up_selected.isChecked())
+            self.assertTrue(v_exp_dlg.cb_up_similar.isChecked())
+            self.assertFalse(v_exp_dlg.cb_up_unselected.isChecked())
+        finally:
+            config.set("experimental_mode", prev_exp)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

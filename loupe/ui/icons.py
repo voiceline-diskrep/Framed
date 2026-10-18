@@ -157,6 +157,18 @@ def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
         painter.drawEllipse(QPointF(s * 0.55, s * 0.28), 1.5, 1.5)
         painter.drawEllipse(QPointF(s * 0.72, s * 0.40), 1.5, 1.5)
 
+    elif name in ("cloud", "drive"):
+        # Cloud / Drive vector icon
+        path = QPainterPath()
+        y_base = s - pad * 1.4
+        path.moveTo(pad * 1.8, y_base)
+        path.lineTo(s - pad * 1.6, y_base)
+        path.arcTo(QRectF(s * 0.58, s * 0.38, s * 0.30, s * 0.36), -90, 180)
+        path.arcTo(QRectF(s * 0.26, pad * 1.2, s * 0.44, s * 0.44), 10, 165)
+        path.arcTo(QRectF(pad, s * 0.42, s * 0.32, s * 0.32), 100, 170)
+        path.closeSubpath()
+        painter.drawPath(path)
+
     else:
         # Default dot
         painter.drawEllipse(QPointF(s / 2, s / 2), 2, 2)

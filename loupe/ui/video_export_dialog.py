@@ -1,31 +1,43 @@
-"""Video export modal dialog with progress telemetry and open folder action."""
+"""Video export modal dialog with Local Disk and Google Drive cloud export, progress telemetry, and open folder action."""
 
 import os
 import subprocess
+import webbrowser
+from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QFileDialog, QProgressBar, QMessageBox, QFrame,
-    QCheckBox, QWidget, QScrollArea, QApplication
+    QCheckBox, QRadioButton, QButtonGroup, QWidget, QScrollArea, QApplication
 )
 from PySide6.QtCore import Qt
 from loupe.models import Project
 from loupe.config import config
 from loupe.core.exporter import sanitize_folder_name
 from loupe.core.video_exporter import VideoExportWorker
+from loupe.core.gdrive import (
+    GoogleDriveClient, GDriveUploadWorker, parse_gdrive_folder_id, format_eta
+)
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_DISTINCT,
     COLOR_BORDER_SUBTLE, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED,
-    COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font
+    COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED,
+    get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
 
+
 class VideoExportDialog(QDialog):
-    """Dialog to initiate non-destructive video export into Selected, Unselected, and Similar."""
+    """Dialog to initiate non-destructive video export into Selected, Unselected, and Similar on Local Disk or Google Drive."""
+
     def __init__(self, project: Project, parent=None):
         super().__init__(parent)
         self.project = project
-        self.worker: VideoExportWorker = None
+        self.worker: Optional[VideoExportWorker] = None
+        self.gdrive_worker: Optional[GDriveUploadWorker] = None
         self.exported_base_dir = ""
+        self.exported_gdrive_url = ""
+        self.gdrive_parent_id: str = config.get("gdrive_export_parent_id", "root") or "root"
+        self.gdrive_parent_name: str = config.get("gdrive_export_parent_name", "My Drive") or "My Drive"
 
         self.setWindowTitle("Export Video Session — Framed")
         self.setMinimumSize(540, 420)
@@ -39,7 +51,7 @@ class VideoExportDialog(QDialog):
             if screen:
                 avail = screen.availableGeometry()
                 target_w = min(680, max(560, avail.width() - 40))
-                target_h = min(680, max(500, avail.height() - 60))
+                target_h = min(700, max(500, avail.height() - 60))
                 self.resize(target_w, target_h)
                 x = avail.x() + (avail.width() - target_w) // 2
                 y = avail.y() + max(10, (avail.height() - target_h) // 2)
@@ -56,7 +68,6 @@ class VideoExportDialog(QDialog):
         main_layout.setContentsMargins(20, 20, 20, 16)
         main_layout.setSpacing(14)
 
-        # Scrollable content area so it never squishes on any display scaling
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
@@ -79,6 +90,43 @@ class VideoExportDialog(QDialog):
         title.setFont(get_display_font(18, bold=True))
         h_layout.addWidget(title)
         layout.addLayout(h_layout)
+
+        # Experimental Destination Mode Selector (Local Disk vs Google Drive)
+        self.mode_frame = QFrame()
+        self.mode_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 10px 14px;
+            }}
+        """)
+        mode_layout = QHBoxLayout(self.mode_frame)
+        mode_layout.setContentsMargins(4, 4, 4, 4)
+        mode_layout.setSpacing(16)
+
+        lbl_target = QLabel("TARGET:")
+        lbl_target.setFont(get_mono_font(10, bold=True))
+        lbl_target.setStyleSheet(f"color: {COLOR_ACCENT};")
+        mode_layout.addWidget(lbl_target)
+
+        self.dest_mode_group = QButtonGroup(self)
+        self.rb_dest_local = QRadioButton("Local Disk")
+        self.rb_dest_local.setFont(get_body_font(12, bold=True))
+        self.rb_dest_local.setChecked(True)
+        self.rb_dest_gdrive = QRadioButton("Google Drive (Experimental)")
+        self.rb_dest_gdrive.setFont(get_body_font(12, bold=True))
+
+        self.dest_mode_group.addButton(self.rb_dest_local, 1)
+        self.dest_mode_group.addButton(self.rb_dest_gdrive, 2)
+        self.rb_dest_local.toggled.connect(self._on_dest_mode_changed)
+
+        mode_layout.addWidget(self.rb_dest_local)
+        mode_layout.addWidget(self.rb_dest_gdrive)
+        mode_layout.addStretch()
+
+        self.mode_frame.setVisible(bool(config.get("experimental_mode", False)))
+        layout.addWidget(self.mode_frame)
 
         # Summary of decisions card
         card_summary = QFrame()
@@ -125,9 +173,9 @@ class VideoExportDialog(QDialog):
         # Destination input
         dir_layout = QVBoxLayout()
         dir_layout.setSpacing(8)
-        lbl_dest = QLabel("Export Directory:")
-        lbl_dest.setFont(get_body_font(12, bold=True))
-        dir_layout.addWidget(lbl_dest)
+        self.lbl_dest = QLabel("Export Directory:")
+        self.lbl_dest.setFont(get_body_font(12, bold=True))
+        dir_layout.addWidget(self.lbl_dest)
 
         row_dest = QHBoxLayout()
         row_dest.setSpacing(10)
@@ -150,10 +198,10 @@ class VideoExportDialog(QDialog):
         """)
         row_dest.addWidget(self.edit_dir, stretch=1)
 
-        btn_browse = QPushButton("Browse...")
-        btn_browse.setFont(get_body_font(12))
-        btn_browse.setMinimumHeight(40)
-        btn_browse.setStyleSheet(f"""
+        self.btn_browse = QPushButton("Browse...")
+        self.btn_browse.setFont(get_body_font(12))
+        self.btn_browse.setMinimumHeight(40)
+        self.btn_browse.setStyleSheet(f"""
             QPushButton {{
                 padding: 0 16px;
                 background-color: {COLOR_BG_ELEVATED};
@@ -167,8 +215,8 @@ class VideoExportDialog(QDialog):
                 background-color: #2A2E35;
             }}
         """)
-        btn_browse.clicked.connect(self._browse)
-        row_dest.addWidget(btn_browse)
+        self.btn_browse.clicked.connect(self._browse)
+        row_dest.addWidget(self.btn_browse)
         dir_layout.addLayout(row_dest)
 
         # Workspace Folder Separation Checkbox
@@ -180,6 +228,42 @@ class VideoExportDialog(QDialog):
         dir_layout.addWidget(self.cb_workspace)
 
         layout.addLayout(dir_layout)
+
+        # Google Drive Category Selection Card
+        self.gdrive_cat_card = QFrame()
+        self.gdrive_cat_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 12px;
+            }}
+        """)
+        gc_layout = QVBoxLayout(self.gdrive_cat_card)
+        gc_layout.setSpacing(8)
+
+        t_gc = QLabel("GOOGLE DRIVE UPLOAD CATEGORIES")
+        t_gc.setFont(get_mono_font(10, bold=True))
+        t_gc.setStyleSheet(f"color: {COLOR_ACCENT};")
+        gc_layout.addWidget(t_gc)
+
+        self.cb_up_selected = QCheckBox(f"Selected ({self.project.selected_count} clips)")
+        self.cb_up_selected.setChecked(True)
+        self.cb_up_selected.toggled.connect(self._update_hierarchy_preview)
+        gc_layout.addWidget(self.cb_up_selected)
+
+        self.cb_up_similar = QCheckBox(f"Similar ({self.project.similar_count} clips)")
+        self.cb_up_similar.setChecked(True)
+        self.cb_up_similar.toggled.connect(self._update_hierarchy_preview)
+        gc_layout.addWidget(self.cb_up_similar)
+
+        self.cb_up_unselected = QCheckBox(f"Unselected ({self.project.unselected_count} clips — unchecked by default to save cloud storage)")
+        self.cb_up_unselected.setChecked(False)
+        self.cb_up_unselected.toggled.connect(self._update_hierarchy_preview)
+        gc_layout.addWidget(self.cb_up_unselected)
+
+        self.gdrive_cat_card.setVisible(False)
+        layout.addWidget(self.gdrive_cat_card)
 
         # Structure Preview Card
         struct_card = QFrame()
@@ -207,7 +291,7 @@ class VideoExportDialog(QDialog):
 
         self._update_hierarchy_preview()
 
-        # Progress bar
+        # Progress bar frame
         self.progress_frame = QFrame()
         self.progress_frame.setVisible(False)
         p_layout = QVBoxLayout(self.progress_frame)
@@ -260,7 +344,7 @@ class VideoExportDialog(QDialog):
                 background-color: {COLOR_BG_ELEVATED};
             }}
         """)
-        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel.clicked.connect(self._cancel_or_close)
         btn_row.addWidget(self.btn_cancel)
 
         btn_row.addStretch()
@@ -272,6 +356,14 @@ class VideoExportDialog(QDialog):
         self.btn_open_folder.setVisible(False)
         self.btn_open_folder.clicked.connect(self._open_output_folder)
         btn_row.addWidget(self.btn_open_folder)
+
+        self.btn_open_gdrive = QPushButton("Open in Google Drive")
+        self.btn_open_gdrive.setFont(get_body_font(12, bold=True))
+        self.btn_open_gdrive.setIcon(render_icon("cloud", 13, COLOR_ACCENT))
+        self.btn_open_gdrive.setMinimumHeight(40)
+        self.btn_open_gdrive.setVisible(False)
+        self.btn_open_gdrive.clicked.connect(self._open_in_gdrive)
+        btn_row.addWidget(self.btn_open_gdrive)
 
         self.btn_start = QPushButton("Start Export")
         self.btn_start.setObjectName("accentButton")
@@ -303,11 +395,54 @@ class VideoExportDialog(QDialog):
 
         main_layout.addLayout(btn_row)
 
+    def _on_dest_mode_changed(self):
+        is_gdrive = self.rb_dest_gdrive.isChecked()
+        self.gdrive_cat_card.setVisible(is_gdrive)
+        if is_gdrive:
+            self.lbl_dest.setText("Google Drive Destination Folder (or paste Folder Link / ID):")
+            self.edit_dir.setText(self.gdrive_parent_name)
+            self.btn_browse.setText("Choose Drive Folder...")
+            self.btn_start.setText("Upload to Google Drive")
+            self.btn_start.setIcon(render_icon("cloud", 13, "#FFFFFF"))
+        else:
+            self.lbl_dest.setText("Export Directory:")
+            default_dir = config.get("default_export_dir") or os.path.join(os.path.expanduser("~"), "Videos")
+            self.edit_dir.setText(default_dir)
+            self.btn_browse.setText("Browse...")
+            self.btn_start.setText("Start Export")
+            self.btn_start.setIcon(render_icon("export", 13, "#FFFFFF"))
+        self._update_hierarchy_preview()
+
     def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, "Select Export Destination", self.edit_dir.text())
-        if d:
-            self.edit_dir.setText(d)
-            self._update_hierarchy_preview()
+        if self.rb_dest_gdrive.isChecked():
+            from loupe.ui.gdrive_dialog import GDriveBrowserDialog
+            from loupe.ui.settings_dialog import SettingsDialog
+
+            if not GoogleDriveClient().is_authenticated():
+                ans = QMessageBox.question(
+                    self,
+                    "Connect Google Drive",
+                    "You need to sign in to Google Drive in Preferences first.\n\nOpen Preferences now?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if ans == QMessageBox.Yes:
+                    SettingsDialog(self).exec()
+                if not GoogleDriveClient().is_authenticated():
+                    return
+
+            dlg = GDriveBrowserDialog(mode="select_folder", media_mode="video", parent=self)
+            if dlg.exec() == QDialog.Accepted:
+                self.gdrive_parent_id = dlg.selected_folder_id or "root"
+                self.gdrive_parent_name = dlg.selected_folder_name or "My Drive"
+                config.set("gdrive_export_parent_id", self.gdrive_parent_id)
+                config.set("gdrive_export_parent_name", self.gdrive_parent_name)
+                self.edit_dir.setText(self.gdrive_parent_name)
+                self._update_hierarchy_preview()
+        else:
+            d = QFileDialog.getExistingDirectory(self, "Select Export Destination", self.edit_dir.text())
+            if d:
+                self.edit_dir.setText(d)
+                self._update_hierarchy_preview()
 
     def _on_workspace_toggled(self, checked: bool):
         config.set("export_separate_by_workspace", checked)
@@ -317,24 +452,79 @@ class VideoExportDialog(QDialog):
         p_name = sanitize_folder_name(self.project.name)
         use_ws = self.cb_workspace.isChecked()
         w_name = sanitize_folder_name(self.project.get_workspace_name())
+        is_gdrive = self.rb_dest_gdrive.isChecked()
 
         lines = []
-        if use_ws:
-            lines.append(f"📁 {w_name}/")
-            lines.append(f"   └── 📁 {p_name}/")
-            indent = "        "
+        if is_gdrive:
+            lines.append(f"☁️ Google Drive ({self.gdrive_parent_name})/")
+            base_indent = "   "
         else:
-            lines.append(f"📁 {p_name}/")
-            indent = "   "
+            base_indent = ""
 
-        lines.extend([
-            f"{indent}├── 📁 Selected/     ({self.project.selected_count} clips)",
-            f"{indent}├── 📁 Similar/      ({self.project.similar_count} clips)",
-            f"{indent}└── 📁 Unselected/   ({self.project.unselected_count} clips)",
-        ])
+        if use_ws:
+            lines.append(f"{base_indent}📁 {w_name}/")
+            lines.append(f"{base_indent}   └── 📁 {p_name}/")
+            indent = base_indent + "        "
+        else:
+            lines.append(f"{base_indent}📁 {p_name}/")
+            indent = base_indent + "   "
+
+        inc_sel = not is_gdrive or self.cb_up_selected.isChecked()
+        inc_sim = not is_gdrive or self.cb_up_similar.isChecked()
+        inc_unsel = not is_gdrive or self.cb_up_unselected.isChecked()
+
+        if inc_sel:
+            lines.append(f"{indent}├── 📁 Selected/     ({self.project.selected_count} clips)")
+        if inc_sim:
+            lines.append(f"{indent}├── 📁 Similar/      ({self.project.similar_count} clips)")
+        if inc_unsel:
+            lines.append(f"{indent}└── 📁 Unselected/   ({self.project.unselected_count} clips)")
         self.preview_lbl.setText("\n".join(lines))
 
     def _start_export(self):
+        use_ws = self.cb_workspace.isChecked()
+
+        if self.rb_dest_gdrive.isChecked():
+            from loupe.ui.settings_dialog import SettingsDialog
+            if not GoogleDriveClient().is_authenticated():
+                ans = QMessageBox.question(
+                    self,
+                    "Connect Google Drive",
+                    "Please sign in to Google Drive in Preferences before uploading.\n\nOpen Preferences now?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if ans == QMessageBox.Yes:
+                    SettingsDialog(self).exec()
+                if not GoogleDriveClient().is_authenticated():
+                    return
+
+            typed_dest = self.edit_dir.text().strip()
+            parent_id = self.gdrive_parent_id
+            if typed_dest and typed_dest != self.gdrive_parent_name:
+                try:
+                    parent_id = parse_gdrive_folder_id(typed_dest)
+                except Exception:
+                    parent_id = self.gdrive_parent_id
+
+            self.btn_start.setEnabled(False)
+            self.btn_cancel.setText("Cancel Upload")
+            self.progress_frame.setVisible(True)
+
+            self.gdrive_worker = GDriveUploadWorker(
+                project=self.project,
+                parent_folder_id=parent_id,
+                separate_by_workspace=use_ws,
+                include_selected=self.cb_up_selected.isChecked(),
+                include_maybe=self.cb_up_similar.isChecked(),
+                include_unselected=self.cb_up_unselected.isChecked(),
+                parent=self
+            )
+            self.gdrive_worker.telemetry_update.connect(self._on_gdrive_telemetry)
+            self.gdrive_worker.upload_finished.connect(self._on_gdrive_finished)
+            self.gdrive_worker.upload_failed.connect(self._on_error)
+            self.gdrive_worker.start()
+            return
+
         root = self.edit_dir.text().strip()
         if not root or not os.path.exists(root):
             QMessageBox.warning(self, "Invalid Directory", "Please select a valid destination directory.")
@@ -344,7 +534,6 @@ class VideoExportDialog(QDialog):
         self.btn_cancel.setEnabled(False)
         self.progress_frame.setVisible(True)
 
-        use_ws = self.cb_workspace.isChecked()
         self.worker = VideoExportWorker(self.project, root, separate_by_workspace=use_ws, parent=self)
         self.worker.progress_changed.connect(self._on_progress)
         self.worker.export_finished.connect(self._on_finished)
@@ -355,6 +544,14 @@ class VideoExportDialog(QDialog):
         pct = int((current / total) * 100) if total > 0 else 0
         self.progress_bar.setValue(pct)
         self.lbl_status.setText(f"Copying [{current}/{total}] {fname} ({mb_s:.1f} MB/s)")
+
+    def _on_gdrive_telemetry(
+        self, completed: int, total: int, pct: float, speed_mb_s: float, eta_sec: float, current_file: str
+    ):
+        self.progress_bar.setValue(int(round(pct)))
+        self.lbl_status.setText(
+            f"Uploading [{completed}/{total}] {current_file}  •  {pct:.1f}%  •  {speed_mb_s:.2f} MB/s  •  ETA: {format_eta(eta_sec)}"
+        )
 
     def _on_finished(self, summary: dict):
         self.exported_base_dir = summary["base_dir"]
@@ -372,10 +569,21 @@ class VideoExportDialog(QDialog):
             f"• Unselected: {summary['unselected_count']}"
         )
 
+    def _on_gdrive_finished(self, summary: dict):
+        self.exported_gdrive_url = summary.get("web_url", "")
+        self.progress_bar.setValue(100)
+        self.lbl_status.setText(f"✓ Uploaded {summary.get('total_uploaded', 0)} clips to Google Drive!")
+        self.lbl_status.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+        self.btn_cancel.setText("Close")
+        self.btn_cancel.setEnabled(True)
+        self.btn_start.setVisible(False)
+        self.btn_open_gdrive.setVisible(True)
+
     def _on_error(self, err_msg: str):
         QMessageBox.critical(self, "Export Error", f"An error occurred during video export:\n{err_msg}")
         self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(True)
+        self.btn_cancel.setText("Cancel")
         self.progress_frame.setVisible(False)
 
     def _open_output_folder(self):
@@ -385,3 +593,16 @@ class VideoExportDialog(QDialog):
             else:
                 subprocess.Popen(["xdg-open", self.exported_base_dir])
         self.accept()
+
+    def _open_in_gdrive(self):
+        if self.exported_gdrive_url:
+            webbrowser.open(self.exported_gdrive_url)
+        self.accept()
+
+    def _cancel_or_close(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.wait(1000)
+        if self.gdrive_worker and self.gdrive_worker.isRunning():
+            self.gdrive_worker.cancel()
+            self.gdrive_worker.wait(1500)
+        self.reject()
