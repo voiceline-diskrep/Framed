@@ -429,16 +429,16 @@ class GoogleDriveClient:
         progress_cb: Optional[Callable[[int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None
     ) -> int:
-        """Download a file from Google Drive in chunks, reporting byte deltas."""
+        """Download a file from Google Drive in optimized 4MB streaming chunks, reporting byte deltas."""
         token = self.get_valid_access_token()
         url = f"{DRIVE_API_BASE}/files/{file_id}?alt=media&supportsAllDrives=true"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
 
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         bytes_downloaded = 0
-        chunk_size = 262144  # 256 KB
+        chunk_size = 4 * 1024 * 1024  # 4 MB high-throughput buffer (was 256KB)
 
-        with urllib.request.urlopen(req, timeout=60) as resp, open(dest_path, "wb") as out_f:
+        with urllib.request.urlopen(req, timeout=120) as resp, open(dest_path, "wb") as out_f:
             while True:
                 if cancel_check and cancel_check():
                     raise InterruptedError("Download cancelled by user.")
@@ -459,7 +459,7 @@ class GoogleDriveClient:
         progress_cb: Optional[Callable[[int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None
     ) -> str:
-        """Upload a local file to Google Drive using a resumable upload session with chunked progress."""
+        """Upload a local file to Google Drive using optimized chunked/resumable upload sessions."""
         token = self.get_valid_access_token()
         file_name = os.path.basename(local_path)
         file_size = os.path.getsize(local_path)
@@ -485,8 +485,14 @@ class GoogleDriveClient:
         if not session_uri:
             raise RuntimeError("Google Drive did not return a resumable upload session URI.")
 
-        # 2. Upload file in chunks (4 MB multiples of 256 KB)
-        chunk_size = 4 * 1024 * 1024
+        # 2. Optimized chunk size:
+        # For files under 32MB (typical JPEG or RAW), upload in a single fast stream (up to 32MB).
+        # For larger files/videos, upload in 16MB chunks (multiple of 256KB required by Google).
+        if file_size <= 32 * 1024 * 1024:
+            chunk_size = 32 * 1024 * 1024
+        else:
+            chunk_size = 16 * 1024 * 1024
+
         offset = 0
 
         if file_size == 0:
@@ -517,7 +523,7 @@ class GoogleDriveClient:
                 }
                 put_req = urllib.request.Request(session_uri, data=chunk, headers=headers, method="PUT")
                 try:
-                    with urllib.request.urlopen(put_req, timeout=120) as resp:
+                    with urllib.request.urlopen(put_req, timeout=180) as resp:
                         body = resp.read().decode("utf-8")
                         offset += chunk_len
                         if progress_cb:
