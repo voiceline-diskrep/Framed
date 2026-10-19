@@ -4,6 +4,9 @@ import os
 import re
 import json
 import time
+import socket
+import threading
+import http.client
 import base64
 import hashlib
 import secrets
@@ -11,6 +14,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional, List, Dict, Any, Tuple, Callable, Set
 from PySide6.QtCore import QThread, Signal
@@ -20,6 +24,12 @@ from loupe.models import Project
 from loupe.core.exporter import sanitize_folder_name
 from loupe.core.decoder import RAW_EXTENSIONS, JPEG_EXTENSIONS
 from loupe.core.video_engine import VIDEO_EXTENSIONS
+
+_TOKEN_LOCK = threading.Lock()
+_THREAD_LOCAL = threading.local()
+MAX_PARALLEL_TRANSFERS = 4
+SOCKET_BUFFER_SIZE = 2 * 1024 * 1024  # 2 MB socket send/receive buffer
+STREAM_BLOCK_SIZE = 512 * 1024        # 512 KB streaming block for live telemetry
 
 
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -272,53 +282,54 @@ class GoogleDriveClient:
             return "Connected Account"
 
     def get_valid_access_token(self) -> str:
-        """Return a valid access_token, refreshing via refresh_token if expired."""
-        token = config.get("gdrive_token", {})
-        if not isinstance(token, dict) or not token:
-            raise RuntimeError("Not signed in to Google Drive. Please sign in via Settings.")
+        """Return a valid access_token, refreshing via refresh_token if expired (thread-safe)."""
+        with _TOKEN_LOCK:
+            token = config.get("gdrive_token", {})
+            if not isinstance(token, dict) or not token:
+                raise RuntimeError("Not signed in to Google Drive. Please sign in via Settings.")
 
-        access_token = token.get("access_token", "")
-        refresh_token = token.get("refresh_token", "")
-        obtained_at = float(token.get("obtained_at", 0))
-        expires_in = float(token.get("expires_in", 3600))
+            access_token = token.get("access_token", "")
+            refresh_token = token.get("refresh_token", "")
+            obtained_at = float(token.get("obtained_at", 0))
+            expires_in = float(token.get("expires_in", 3600))
 
-        # If token is still fresh (with 90s buffer), return it
-        if access_token and (time.time() - obtained_at) < (expires_in - 90):
-            return access_token
-
-        if not refresh_token:
-            if access_token:
+            # If token is still fresh (with 90s buffer), return it
+            if access_token and (time.time() - obtained_at) < (expires_in - 90):
                 return access_token
-            raise RuntimeError("Google Drive session expired. Please sign in again via Settings.")
 
-        client_id, client_secret = self.get_client_credentials()
-        payload = urllib.parse.urlencode({
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token",
-        }).encode("utf-8")
+            if not refresh_token:
+                if access_token:
+                    return access_token
+                raise RuntimeError("Google Drive session expired. Please sign in again via Settings.")
 
-        req = urllib.request.Request(
-            GOOGLE_TOKEN_ENDPOINT,
-            data=payload,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                new_data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Failed to refresh Google Drive token ({e.code}): {err_body}")
+            client_id, client_secret = self.get_client_credentials()
+            payload = urllib.parse.urlencode({
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            }).encode("utf-8")
 
-        token["access_token"] = new_data["access_token"]
-        token["expires_in"] = new_data.get("expires_in", 3600)
-        token["obtained_at"] = time.time()
-        if "refresh_token" in new_data:
-            token["refresh_token"] = new_data["refresh_token"]
-        config.set("gdrive_token", token)
-        return token["access_token"]
+            req = urllib.request.Request(
+                GOOGLE_TOKEN_ENDPOINT,
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    new_data = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="ignore")
+                raise RuntimeError(f"Failed to refresh Google Drive token ({e.code}): {err_body}")
+
+            token["access_token"] = new_data["access_token"]
+            token["expires_in"] = new_data.get("expires_in", 3600)
+            token["obtained_at"] = time.time()
+            if "refresh_token" in new_data:
+                token["refresh_token"] = new_data["refresh_token"]
+            config.set("gdrive_token", token)
+            return token["access_token"]
 
     def _api_request(self, url: str, method: str = "GET", body: Optional[Dict] = None) -> Dict[str, Any]:
         token = self.get_valid_access_token()
@@ -422,6 +433,32 @@ class GoogleDriveClient:
         })
         return self._api_request(f"{DRIVE_API_BASE}/files?{create_params}", method="POST", body=body)
 
+    @staticmethod
+    def _get_thread_connection(host: str = "www.googleapis.com", force_new: bool = False) -> http.client.HTTPSConnection:
+        """Return a thread-local persistent HTTPSConnection with enlarged 2MB socket buffers."""
+        conns = getattr(_THREAD_LOCAL, "conns", None)
+        if conns is None:
+            conns = {}
+            _THREAD_LOCAL.conns = conns
+
+        conn: Optional[http.client.HTTPSConnection] = conns.get(host)
+        if force_new or conn is None or conn.sock is None:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            conn = http.client.HTTPSConnection(host, timeout=180)
+            conn.connect()
+            try:
+                conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SOCKET_BUFFER_SIZE)
+                conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_BUFFER_SIZE)
+            except Exception:
+                pass
+            conns[host] = conn
+        return conn
+
     def download_file_chunked(
         self,
         file_id: str,
@@ -429,28 +466,45 @@ class GoogleDriveClient:
         progress_cb: Optional[Callable[[int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None
     ) -> int:
-        """Download a file from Google Drive in optimized 4MB streaming chunks, reporting byte deltas."""
+        """Download a file from Google Drive over a persistent 2MB-buffered HTTPS socket."""
         token = self.get_valid_access_token()
-        url = f"{DRIVE_API_BASE}/files/{file_id}?alt=media&supportsAllDrives=true"
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        path = f"/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Connection": "keep-alive",
+        }
 
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        bytes_downloaded = 0
-        chunk_size = 4 * 1024 * 1024  # 4 MB high-throughput buffer (was 256KB)
 
-        with urllib.request.urlopen(req, timeout=120) as resp, open(dest_path, "wb") as out_f:
-            while True:
-                if cancel_check and cancel_check():
-                    raise InterruptedError("Download cancelled by user.")
-                chunk = resp.read(chunk_size)
-                if not chunk:
-                    break
-                out_f.write(chunk)
-                bytes_downloaded += len(chunk)
-                if progress_cb:
-                    progress_cb(len(chunk))
+        for attempt in range(2):
+            conn = self._get_thread_connection("www.googleapis.com", force_new=(attempt > 0))
+            try:
+                conn.request("GET", path, headers=headers)
+                resp = conn.getresponse()
+                if resp.status >= 400:
+                    err_body = resp.read().decode("utf-8", errors="ignore")
+                    raise RuntimeError(f"Drive download error ({resp.status}): {err_body}")
 
-        return bytes_downloaded
+                bytes_downloaded = 0
+                with open(dest_path, "wb", buffering=SOCKET_BUFFER_SIZE) as out_f:
+                    while True:
+                        if cancel_check and cancel_check():
+                            conn.close()
+                            raise InterruptedError("Download cancelled by user.")
+                        chunk = resp.read(STREAM_BLOCK_SIZE)
+                        if not chunk:
+                            break
+                        out_f.write(chunk)
+                        bytes_downloaded += len(chunk)
+                        if progress_cb:
+                            progress_cb(len(chunk))
+                return bytes_downloaded
+            except InterruptedError:
+                raise
+            except (http.client.HTTPException, OSError):
+                if attempt == 1:
+                    raise
+        return 0
 
     def upload_file_chunked(
         self,
@@ -459,12 +513,96 @@ class GoogleDriveClient:
         progress_cb: Optional[Callable[[int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None
     ) -> str:
-        """Upload a local file to Google Drive using optimized chunked/resumable upload sessions."""
+        """
+        High-speed file upload to Google Drive:
+        - Files <= 32 MB: Single-request multipart stream over persistent 2MB-buffered HTTPS socket
+          (eliminates extra session-init HTTP roundtrip while reporting live 512KB byte progress).
+        - Files > 32 MB: Resumable 32MB chunked upload streamed in 512KB blocks.
+        """
+        file_size = os.path.getsize(local_path)
+        if file_size <= 32 * 1024 * 1024:
+            return self._upload_multipart_fast(local_path, parent_id, file_size, progress_cb, cancel_check)
+        return self._upload_resumable_large(local_path, parent_id, file_size, progress_cb, cancel_check)
+
+    def _upload_multipart_fast(
+        self,
+        local_path: str,
+        parent_id: str,
+        file_size: int,
+        progress_cb: Optional[Callable[[int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None
+    ) -> str:
+        """Single-roundtrip multipart/related streaming upload over a persistent keep-alive socket."""
         token = self.get_valid_access_token()
         file_name = os.path.basename(local_path)
-        file_size = os.path.getsize(local_path)
+        boundary = f"===============framed_{secrets.token_hex(12)}=="
 
-        # 1. Initiate resumable upload session
+        metadata_json = json.dumps({"name": file_name, "parents": [parent_id]}).encode("utf-8")
+        preamble = (
+            f"--{boundary}\r\n"
+            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        ).encode("utf-8") + metadata_json + (
+            f"\r\n--{boundary}\r\n"
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+        epilogue = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        total_content_length = len(preamble) + file_size + len(epilogue)
+
+        path = "/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id"
+
+        for attempt in range(2):
+            sent_in_attempt = 0
+            conn = self._get_thread_connection("www.googleapis.com", force_new=(attempt > 0))
+            try:
+                conn.putrequest("POST", path)
+                conn.putheader("Authorization", f"Bearer {token}")
+                conn.putheader("Content-Type", f'multipart/related; boundary="{boundary}"')
+                conn.putheader("Content-Length", str(total_content_length))
+                conn.putheader("Connection", "keep-alive")
+                conn.endheaders()
+
+                conn.send(preamble)
+                with open(local_path, "rb", buffering=SOCKET_BUFFER_SIZE) as f:
+                    while True:
+                        if cancel_check and cancel_check():
+                            conn.close()
+                            raise InterruptedError("Upload cancelled by user.")
+                        buf = f.read(STREAM_BLOCK_SIZE)
+                        if not buf:
+                            break
+                        conn.send(buf)
+                        sent_in_attempt += len(buf)
+                        if progress_cb:
+                            progress_cb(len(buf))
+
+                conn.send(epilogue)
+                resp = conn.getresponse()
+                resp_body = resp.read().decode("utf-8", errors="ignore")
+                if resp.status >= 400:
+                    raise RuntimeError(f"Drive multipart upload failed ({resp.status}): {resp_body}")
+                data = json.loads(resp_body) if resp_body else {}
+                return data.get("id", "")
+            except InterruptedError:
+                raise
+            except (http.client.HTTPException, OSError):
+                if sent_in_attempt > 0 and progress_cb:
+                    progress_cb(-sent_in_attempt)
+                if attempt == 1:
+                    raise
+        return ""
+
+    def _upload_resumable_large(
+        self,
+        local_path: str,
+        parent_id: str,
+        file_size: int,
+        progress_cb: Optional[Callable[[int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None
+    ) -> str:
+        """Resumable upload for large files (>32MB), streaming 32MB chunks in 512KB blocks for smooth telemetry."""
+        token = self.get_valid_access_token()
+        file_name = os.path.basename(local_path)
+
         init_url = f"{DRIVE_UPLOAD_BASE}/files?uploadType=resumable&supportsAllDrives=true"
         metadata = {"name": file_name, "parents": [parent_id]}
         meta_bytes = json.dumps(metadata).encode("utf-8")
@@ -485,61 +623,55 @@ class GoogleDriveClient:
         if not session_uri:
             raise RuntimeError("Google Drive did not return a resumable upload session URI.")
 
-        # 2. Optimized chunk size:
-        # For files under 32MB (typical JPEG or RAW), upload in a single fast stream (up to 32MB).
-        # For larger files/videos, upload in 16MB chunks (multiple of 256KB required by Google).
-        if file_size <= 32 * 1024 * 1024:
-            chunk_size = 32 * 1024 * 1024
-        else:
-            chunk_size = 16 * 1024 * 1024
+        parsed_uri = urllib.parse.urlparse(session_uri)
+        host = parsed_uri.netloc or "www.googleapis.com"
+        request_target = f"{parsed_uri.path}?{parsed_uri.query}" if parsed_uri.query else parsed_uri.path
 
+        chunk_size = 32 * 1024 * 1024  # 32 MB chunks
         offset = 0
 
-        if file_size == 0:
-            put_req = urllib.request.Request(
-                session_uri,
-                data=b"",
-                headers={"Content-Length": "0"},
-                method="PUT"
-            )
-            with urllib.request.urlopen(put_req, timeout=30) as resp:
-                res_data = json.loads(resp.read().decode("utf-8") or "{}")
-                return res_data.get("id", "")
-
-        with open(local_path, "rb") as f:
+        with open(local_path, "rb", buffering=SOCKET_BUFFER_SIZE) as f:
             while offset < file_size:
                 if cancel_check and cancel_check():
                     raise InterruptedError("Upload cancelled by user.")
 
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                chunk_len = len(chunk)
-                end_byte = offset + chunk_len - 1
+                remaining = file_size - offset
+                cur_chunk_len = min(chunk_size, remaining)
+                end_byte = offset + cur_chunk_len - 1
 
-                headers = {
-                    "Content-Length": str(chunk_len),
-                    "Content-Range": f"bytes {offset}-{end_byte}/{file_size}",
-                }
-                put_req = urllib.request.Request(session_uri, data=chunk, headers=headers, method="PUT")
-                try:
-                    with urllib.request.urlopen(put_req, timeout=180) as resp:
-                        body = resp.read().decode("utf-8")
-                        offset += chunk_len
-                        if progress_cb:
-                            progress_cb(chunk_len)
-                        if body:
-                            res_data = json.loads(body)
-                            return res_data.get("id", "")
-                except urllib.error.HTTPError as e:
-                    if e.code == 308:
-                        # 308 Resume Incomplete is the expected response for intermediate chunks!
-                        offset += chunk_len
-                        if progress_cb:
-                            progress_cb(chunk_len)
-                    else:
-                        err_body = e.read().decode("utf-8", errors="ignore")
-                        raise RuntimeError(f"Drive chunk upload failed ({e.code}): {err_body}")
+                conn = self._get_thread_connection(host)
+                conn.putrequest("PUT", request_target)
+                conn.putheader("Content-Length", str(cur_chunk_len))
+                conn.putheader("Content-Range", f"bytes {offset}-{end_byte}/{file_size}")
+                conn.putheader("Connection", "keep-alive")
+                conn.endheaders()
+
+                bytes_sent_in_chunk = 0
+                while bytes_sent_in_chunk < cur_chunk_len:
+                    if cancel_check and cancel_check():
+                        conn.close()
+                        raise InterruptedError("Upload cancelled by user.")
+                    to_read = min(STREAM_BLOCK_SIZE, cur_chunk_len - bytes_sent_in_chunk)
+                    buf = f.read(to_read)
+                    if not buf:
+                        break
+                    conn.send(buf)
+                    bytes_sent_in_chunk += len(buf)
+                    if progress_cb:
+                        progress_cb(len(buf))
+
+                resp = conn.getresponse()
+                body = resp.read().decode("utf-8", errors="ignore")
+                if resp.status in (200, 201):
+                    offset += cur_chunk_len
+                    if body:
+                        res_data = json.loads(body)
+                        return res_data.get("id", "")
+                    return ""
+                elif resp.status == 308:
+                    offset += cur_chunk_len
+                else:
+                    raise RuntimeError(f"Drive chunk upload failed ({resp.status}): {body}")
 
         return ""
 
@@ -564,7 +696,7 @@ class GDriveAuthWorker(QThread):
 
 
 class GDriveDownloadWorker(QThread):
-    """Background worker that downloads a Google Drive folder into a local workspace cache with full telemetry."""
+    """Background worker that downloads a Google Drive folder into local cache using 4 parallel streams."""
     # (completed_files, total_files, overall_pct, speed_mb_s, eta_sec, current_file)
     telemetry_update = Signal(int, int, float, float, float, str)
     download_finished = Signal(str, str, int)  # (local_cache_dir, folder_name, downloaded_count)
@@ -610,38 +742,45 @@ class GDriveDownloadWorker(QThread):
             downloaded_bytes = 0
             completed_files = 0
             start_time = time.perf_counter()
+            stats_lock = threading.Lock()
+            last_emit_time = 0.0
 
-            for f_info in remote_files:
-                if self._is_cancelled:
-                    self.download_failed.emit("Download cancelled by user.")
+            def _emit_telemetry(cur_name: str, force: bool = False):
+                nonlocal last_emit_time
+                now = time.perf_counter()
+                if not force and (now - last_emit_time) < 0.05:
                     return
+                last_emit_time = now
+                elapsed = max(0.01, now - start_time)
+                speed = (downloaded_bytes / (1024 * 1024)) / elapsed
+                rem_bytes = max(0, total_bytes - downloaded_bytes)
+                eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
+                pct = (downloaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
+                cap_pct = min(100.0 if completed_files >= total_files else 99.9, max(0.0, pct))
+                self.telemetry_update.emit(completed_files, total_files, cap_pct, speed, eta, cur_name)
+
+            def _download_one(f_info: Dict[str, Any]):
+                nonlocal downloaded_bytes, completed_files
+                if self._is_cancelled:
+                    raise InterruptedError("Download cancelled by user.")
 
                 fid = f_info["id"]
                 fname = f_info["name"]
                 fsize = int(f_info.get("size", 0) or 0)
                 dest_path = os.path.join(local_dir, fname)
 
-                # Skip re-downloading if already cached with matching size
                 if os.path.exists(dest_path) and fsize > 0 and os.path.getsize(dest_path) == fsize:
-                    downloaded_bytes += fsize
-                    completed_files += 1
-                    elapsed = max(0.01, time.perf_counter() - start_time)
-                    speed = (downloaded_bytes / (1024 * 1024)) / elapsed
-                    rem_bytes = max(0, total_bytes - downloaded_bytes)
-                    eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
-                    pct = (downloaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
-                    self.telemetry_update.emit(completed_files, total_files, min(100.0, pct), speed, eta, fname)
-                    continue
+                    with stats_lock:
+                        downloaded_bytes += fsize
+                        completed_files += 1
+                        _emit_telemetry(fname, force=True)
+                    return
 
                 def _on_chunk(delta: int, cur_name=fname):
                     nonlocal downloaded_bytes
-                    downloaded_bytes += delta
-                    elapsed = max(0.01, time.perf_counter() - start_time)
-                    speed = (downloaded_bytes / (1024 * 1024)) / elapsed
-                    rem_bytes = max(0, total_bytes - downloaded_bytes)
-                    eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
-                    pct = (downloaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
-                    self.telemetry_update.emit(completed_files, total_files, min(99.9, pct), speed, eta, cur_name)
+                    with stats_lock:
+                        downloaded_bytes += delta
+                        _emit_telemetry(cur_name, force=False)
 
                 self.client.download_file_chunked(
                     fid,
@@ -649,13 +788,17 @@ class GDriveDownloadWorker(QThread):
                     progress_cb=_on_chunk,
                     cancel_check=lambda: self._is_cancelled
                 )
-                completed_files += 1
-                elapsed = max(0.01, time.perf_counter() - start_time)
-                speed = (downloaded_bytes / (1024 * 1024)) / elapsed
-                rem_bytes = max(0, total_bytes - downloaded_bytes)
-                eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
-                pct = (downloaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
-                self.telemetry_update.emit(completed_files, total_files, min(100.0, pct), speed, eta, fname)
+                with stats_lock:
+                    completed_files += 1
+                    _emit_telemetry(fname, force=True)
+
+            with ThreadPoolExecutor(max_workers=MAX_PARALLEL_TRANSFERS) as pool:
+                futures = [pool.submit(_download_one, f_info) for f_info in remote_files]
+                for fut in as_completed(futures):
+                    if self._is_cancelled:
+                        self.download_failed.emit("Download cancelled by user.")
+                        return
+                    fut.result()
 
             self.download_finished.emit(local_dir, folder_name, completed_files)
         except InterruptedError:
@@ -665,7 +808,7 @@ class GDriveDownloadWorker(QThread):
 
 
 class GDriveUploadWorker(QThread):
-    """Background worker that uploads a culled Photo or Video session to Google Drive with full telemetry."""
+    """Background worker that uploads a culled Photo or Video session to Google Drive using 4 parallel streams."""
     # (completed_files, total_files, overall_pct, speed_mb_s, eta_sec, current_file)
     telemetry_update = Signal(int, int, float, float, float, str)
     upload_finished = Signal(dict)  # {"folder_id": str, "web_url": str, "total_uploaded": int}
@@ -704,7 +847,6 @@ class GDriveUploadWorker(QThread):
             include_raw = fmt_mode in ("both", "raw_only")
             include_jpeg = fmt_mode in ("both", "jpeg_only")
 
-            # Collect upload tasks: list of (local_file_path, relative_folder_tuple)
             tasks: List[Tuple[str, Tuple[str, ...]]] = []
 
             if is_video:
@@ -762,7 +904,7 @@ class GDriveUploadWorker(QThread):
 
             self.telemetry_update.emit(0, total_files, 0.0, 0.0, 0.0, "Creating Google Drive folders...")
 
-            # Create root hierarchy on Google Drive
+            # 1. Pre-create root & subfolder hierarchy sequentially so parallel workers have zero folder lock contention
             curr_parent = self.parent_folder_id
             if self.separate_by_workspace:
                 ws_name = sanitize_folder_name(self.project.get_workspace_name())
@@ -774,7 +916,6 @@ class GDriveUploadWorker(QThread):
             proj_folder_id = proj_folder["id"]
             proj_web_url = proj_folder.get("webViewLink") or f"https://drive.google.com/drive/folders/{proj_folder_id}"
 
-            # Cache created subfolder IDs: tuple_path -> folder_id
             folder_cache: Dict[Tuple[str, ...], str] = {(): proj_folder_id}
 
             def _ensure_remote_path(rel_tuple: Tuple[str, ...]) -> str:
@@ -786,28 +927,49 @@ class GDriveUploadWorker(QThread):
                 folder_cache[rel_tuple] = created["id"]
                 return created["id"]
 
+            unique_rel_tuples = sorted(set(rel_tuple for _, rel_tuple in tasks))
+            for rel_tuple in unique_rel_tuples:
+                if self._is_cancelled:
+                    self.upload_failed.emit("Upload cancelled by user.")
+                    return
+                _ensure_remote_path(rel_tuple)
+
+            # 2. Upload files concurrently across MAX_PARALLEL_TRANSFERS (4) persistent HTTPS streams
             total_bytes = sum(os.path.getsize(p) for p, _ in tasks if os.path.exists(p))
             uploaded_bytes = 0
             completed_files = 0
             start_time = time.perf_counter()
+            stats_lock = threading.Lock()
+            last_emit_time = 0.0
 
-            for local_path, rel_tuple in tasks:
-                if self._is_cancelled:
-                    self.upload_failed.emit("Upload cancelled by user.")
+            def _emit_telemetry(cur_name: str, force: bool = False):
+                nonlocal last_emit_time
+                now = time.perf_counter()
+                if not force and (now - last_emit_time) < 0.05:
                     return
+                last_emit_time = now
+                elapsed = max(0.01, now - start_time)
+                speed = (uploaded_bytes / (1024 * 1024)) / elapsed
+                rem_bytes = max(0, total_bytes - uploaded_bytes)
+                eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
+                pct = (uploaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
+                cap_pct = min(100.0 if completed_files >= total_files else 99.9, max(0.0, pct))
+                self.telemetry_update.emit(completed_files, total_files, cap_pct, speed, eta, cur_name)
 
-                target_folder_id = _ensure_remote_path(rel_tuple)
+            def _upload_one(task_item: Tuple[str, Tuple[str, ...]]):
+                nonlocal uploaded_bytes, completed_files
+                if self._is_cancelled:
+                    raise InterruptedError("Upload cancelled by user.")
+
+                local_path, rel_tuple = task_item
+                target_folder_id = folder_cache[rel_tuple]
                 fname = os.path.basename(local_path)
 
                 def _on_chunk(delta: int, cur_name=fname):
                     nonlocal uploaded_bytes
-                    uploaded_bytes += delta
-                    elapsed = max(0.01, time.perf_counter() - start_time)
-                    speed = (uploaded_bytes / (1024 * 1024)) / elapsed
-                    rem_bytes = max(0, total_bytes - uploaded_bytes)
-                    eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
-                    pct = (uploaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
-                    self.telemetry_update.emit(completed_files, total_files, min(99.9, pct), speed, eta, cur_name)
+                    with stats_lock:
+                        uploaded_bytes += delta
+                        _emit_telemetry(cur_name, force=False)
 
                 self.client.upload_file_chunked(
                     local_path,
@@ -815,13 +977,17 @@ class GDriveUploadWorker(QThread):
                     progress_cb=_on_chunk,
                     cancel_check=lambda: self._is_cancelled
                 )
-                completed_files += 1
-                elapsed = max(0.01, time.perf_counter() - start_time)
-                speed = (uploaded_bytes / (1024 * 1024)) / elapsed
-                rem_bytes = max(0, total_bytes - uploaded_bytes)
-                eta = (rem_bytes / (1024 * 1024)) / speed if speed > 0.05 else 0.0
-                pct = (uploaded_bytes / total_bytes * 100.0) if total_bytes > 0 else (completed_files / total_files * 100.0)
-                self.telemetry_update.emit(completed_files, total_files, min(100.0, pct), speed, eta, fname)
+                with stats_lock:
+                    completed_files += 1
+                    _emit_telemetry(fname, force=True)
+
+            with ThreadPoolExecutor(max_workers=MAX_PARALLEL_TRANSFERS) as pool:
+                futures = [pool.submit(_upload_one, t) for t in tasks]
+                for fut in as_completed(futures):
+                    if self._is_cancelled:
+                        self.upload_failed.emit("Upload cancelled by user.")
+                        return
+                    fut.result()
 
             self.upload_finished.emit({
                 "folder_id": proj_folder_id,
