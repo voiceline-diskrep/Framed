@@ -107,6 +107,7 @@ class ReviewView(QWidget):
         self.is_preloading_paused = False
         self.target_nav_index: Optional[int] = None
         self.undo_stack: List[tuple] = []  # (index, old_status)
+        self.is_inspecting_raw = False
 
         self._init_ui()
         self.setFocusPolicy(Qt.StrongFocus)
@@ -155,6 +156,20 @@ class ReviewView(QWidget):
         top_layout.addLayout(proj_info_layout)
 
         top_layout.addStretch()
+
+        # Match Mode Quota Badge
+        self.quota_badge = QLabel("")
+        self.quota_badge.setFont(get_mono_font(11, bold=True))
+        self.quota_badge.setVisible(False)
+        top_layout.addWidget(self.quota_badge)
+
+        # Inspect RAW toggle button (for sessions using JPEG preview with linked RAW)
+        self.inspect_raw_btn = QPushButton("Inspect RAW (R)")
+        self.inspect_raw_btn.setFont(get_mono_font(11, bold=True))
+        self.inspect_raw_btn.setIcon(render_icon("loupe", 14, COLOR_ACCENT))
+        self.inspect_raw_btn.setVisible(False)
+        self.inspect_raw_btn.clicked.connect(self._toggle_inspect_raw)
+        top_layout.addWidget(self.inspect_raw_btn)
 
         # Canvas Zoom Tools
         self.fit_btn = QPushButton("Fit (F)")
@@ -419,13 +434,82 @@ class ReviewView(QWidget):
 
         self.counter_lbl.setText(f"Frame {idx + 1} of {len(self.project.items)}")
         
-        fmt_str = "RAW + JPEG (Synced)" if item.has_both and self.project.sync_pairs else ("RAW" if item.raw_path else "JPEG")
+        is_jpeg_linked = bool(
+            item.raw_path and item.jpeg_path and getattr(self.project, "preview_mode", "") == "jpeg" and getattr(self.project, "link_to_raw", False)
+        )
+        if is_jpeg_linked:
+            fmt_str = "JPEG Preview (Linked to RAW)"
+        elif item.has_both and self.project.sync_pairs:
+            fmt_str = "RAW + JPEG (Synced)"
+        else:
+            fmt_str = "RAW" if item.raw_path else "JPEG"
         self.current_filename_lbl.setText(f"{item.base_name} • {fmt_str}")
 
-        self.tally_lbl.setText(
-            f"Kept: {self.project.kept_count}  |  Maybe: {self.project.maybe_count}  |  Not Accepted: {self.project.rejected_count}  |  Remaining: {self.project.pending_count}"
-        )
+        tally_msg = f"Kept: {self.project.kept_count}  |  Maybe: {self.project.maybe_count}  |  Not Accepted: {self.project.rejected_count}  |  Remaining: {self.project.pending_count}"
+        if getattr(self.project, "is_match_mode", False) and getattr(self.project, "max_selected_count", 0) > 0:
+            tally_msg += f"  |  Quota: {self.project.selected_count}/{self.project.max_selected_count}"
+        self.tally_lbl.setText(tally_msg)
+
         self.stats_panel.update_rejected_count(self.project.rejected_count)
+        if getattr(self.project, "is_match_mode", False) and getattr(self.project, "max_selected_count", 0) > 0:
+            self.stats_panel.update_match_quota(self.project.selected_count, self.project.max_selected_count)
+        else:
+            self.stats_panel.update_match_quota(0, 0)
+
+        # Update Match Mode Quota Badge
+        if getattr(self.project, "is_match_mode", False) and getattr(self.project, "max_selected_count", 0) > 0:
+            max_limit = self.project.max_selected_count
+            current_sel = self.project.selected_count
+            self.quota_badge.setVisible(True)
+            if current_sel > max_limit:
+                over = current_sel - max_limit
+                self.quota_badge.setText(f"OVER QUOTA: {current_sel} / {max_limit} (+{over})")
+                self.quota_badge.setStyleSheet(f"""
+                    background-color: #381212;
+                    color: #F87171;
+                    border: 1px solid {COLOR_STATUS_REJECTED};
+                    padding: 4px 10px;
+                    border-radius: 3px;
+                """)
+            elif current_sel == max_limit:
+                self.quota_badge.setText(f"QUOTA REACHED: {current_sel} / {max_limit}")
+                self.quota_badge.setStyleSheet(f"""
+                    background-color: #382A10;
+                    color: #FBBF24;
+                    border: 1px solid {COLOR_STATUS_MAYBE};
+                    padding: 4px 10px;
+                    border-radius: 3px;
+                """)
+            else:
+                self.quota_badge.setText(f"QUOTA: {current_sel} / {max_limit}")
+                self.quota_badge.setStyleSheet(f"""
+                    background-color: #162B1D;
+                    color: #6EE7B7;
+                    border: 1px solid {COLOR_STATUS_KEPT};
+                    padding: 4px 10px;
+                    border-radius: 3px;
+                """)
+        else:
+            self.quota_badge.setVisible(False)
+
+        # Update Inspect RAW button visibility
+        has_linked_raw = bool(item.raw_path and os.path.exists(item.raw_path) and item.primary_path != item.raw_path)
+        self.inspect_raw_btn.setVisible(has_linked_raw)
+        if not self.is_inspecting_raw:
+            self.inspect_raw_btn.setText("Inspect RAW (R)")
+            self.inspect_raw_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLOR_BG_ELEVATED};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 3px;
+                    color: {COLOR_TEXT_PRIMARY};
+                    padding: 0 12px;
+                }}
+                QPushButton:hover {{
+                    border-color: {COLOR_ACCENT};
+                    color: {COLOR_ACCENT};
+                }}
+            """)
 
         # Check if all pictures are done: show the green Finish Session button on top left!
         all_done = bool(self.project and len(self.project.items) > 0 and self.project.pending_count == 0)
@@ -498,6 +582,9 @@ class ReviewView(QWidget):
         # Always update project current index to destination and persist
         self.project.current_index = target_idx
         storage.save_project(self.project)
+
+        # Reset on-demand raw inspection on new frame navigation
+        self.is_inspecting_raw = False
 
         # Check if navigating requires a batch pause
         needs_pause, b_start, b_end = self.preload_manager.check_navigation(target_idx, direction)
@@ -623,6 +710,56 @@ class ReviewView(QWidget):
             self.unload_project()
             self.back_to_dashboard.emit()
 
+    def _toggle_inspect_raw(self):
+        if not self.project or not self.project.items:
+            return
+        idx = self.project.current_index
+        item = self.project.items[idx]
+        if not item.raw_path or not os.path.exists(item.raw_path):
+            return
+
+        from loupe.core.decoder import ImageDecoder
+
+        if self.is_inspecting_raw:
+            # Revert to cached JPEG
+            self.is_inspecting_raw = False
+            self.inspect_raw_btn.setText("Inspect RAW (R)")
+            self.inspect_raw_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLOR_BG_ELEVATED};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 3px;
+                    color: {COLOR_TEXT_PRIMARY};
+                    padding: 0 12px;
+                }}
+                QPushButton:hover {{
+                    border-color: {COLOR_ACCENT};
+                    color: {COLOR_ACCENT};
+                }}
+            """)
+            qimg = self.preload_manager.get_image(idx)
+            if qimg and not qimg.isNull():
+                self._render_image(qimg)
+            else:
+                self.canvas.clear()
+        else:
+            # Decode RAW on demand
+            qimg, _ = ImageDecoder.decode_to_qimage(item.raw_path)
+            if qimg and not qimg.isNull():
+                self.is_inspecting_raw = True
+                self.inspect_raw_btn.setText("Viewing RAW (R)")
+                self.inspect_raw_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: #382A10;
+                        border: 1px solid {COLOR_ACCENT};
+                        border-radius: 3px;
+                        color: {COLOR_ACCENT};
+                        font-weight: 700;
+                        padding: 0 12px;
+                    }}
+                """)
+                self._render_image(qimg)
+
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
         key_str = event.text().upper()
@@ -663,6 +800,9 @@ class ReviewView(QWidget):
             event.accept()
         elif key == Qt.Key_I:
             self._toggle_stats_panel()
+            event.accept()
+        elif key == Qt.Key_R:
+            self._toggle_inspect_raw()
             event.accept()
         elif key == Qt.Key_F11:
             win = self.window()

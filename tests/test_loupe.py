@@ -943,9 +943,202 @@ class TestLoupeWorkstation(unittest.TestCase):
         finally:
             config.set("experimental_mode", prev_exp)
 
+    def test_match_mode_project_model(self):
+        """Verify Project match mode attributes, quota calculation, and dictionary serialization."""
+        items = [
+            PhotoItem(base_name="IMG_01", primary_path="1.jpg", status="pending"),
+            PhotoItem(base_name="IMG_02", primary_path="2.jpg", status="pending"),
+            PhotoItem(base_name="IMG_03", primary_path="3.jpg", status="pending"),
+        ]
+        proj = Project(
+            name="Derby Match Session",
+            is_match_mode=True,
+            max_selected_count=2,
+            preview_mode="jpeg",
+            link_to_raw=True,
+            items=items
+        )
+
+        self.assertTrue(proj.is_match_mode)
+        self.assertEqual(proj.max_selected_count, 2)
+        self.assertEqual(proj.preview_mode, "jpeg")
+        self.assertTrue(proj.link_to_raw)
+        self.assertFalse(proj.is_over_quota)
+        self.assertEqual(proj.quota_remaining, 2)
+
+        # Mark 1 as kept
+        items[0].status = "kept"
+        self.assertFalse(proj.is_over_quota)
+        self.assertEqual(proj.quota_remaining, 1)
+
+        # Mark 2 as kept (at quota)
+        items[1].status = "kept"
+        self.assertFalse(proj.is_over_quota)
+        self.assertEqual(proj.quota_remaining, 0)
+
+        # Mark 3 as kept (over quota)
+        items[2].status = "kept"
+        self.assertTrue(proj.is_over_quota)
+        self.assertEqual(proj.quota_remaining, 0)
+
+        # Serialization round-trip
+        data = proj.to_dict()
+        self.assertTrue(data["is_match_mode"])
+        self.assertEqual(data["max_selected_count"], 2)
+        self.assertEqual(data["preview_mode"], "jpeg")
+        self.assertTrue(data["link_to_raw"])
+
+        restored = Project.from_dict(data)
+        self.assertTrue(restored.is_match_mode)
+        self.assertEqual(restored.max_selected_count, 2)
+        self.assertEqual(restored.preview_mode, "jpeg")
+        self.assertTrue(restored.link_to_raw)
+        self.assertTrue(restored.is_over_quota)
+
+    def test_session_setup_match_mode_and_preview_engine(self):
+        """Verify SessionSetupView controls for Match Mode and Preview Engine when experimental_mode is toggled."""
+        from loupe.ui.session_setup_dialog import SessionSetupView
+        prev_exp = config.get("experimental_mode", False)
+        try:
+            # 1. Experimental Mode OFF: Cards must be hidden
+            config.set("experimental_mode", False)
+            setup = SessionSetupView()
+            setup.reset_form()
+            self.assertTrue(setup.sec_match_mode.isHidden())
+            self.assertTrue(setup.sec_preview_engine.isHidden())
+
+            # 2. Experimental Mode ON: Cards must be visible
+            config.set("experimental_mode", True)
+            setup.reset_form()
+            self.assertFalse(setup.sec_match_mode.isHidden())
+            self.assertFalse(setup.sec_preview_engine.isHidden())
+
+            # Test Match Mode toggle
+            self.assertTrue(setup.match_limit_container.isHidden())
+            setup.cb_match_mode.setChecked(True)
+            self.assertFalse(setup.match_limit_container.isHidden())
+            setup.sb_match_limit.setValue(15)
+
+            # Test Preview Engine toggle
+            setup.rb_preview_jpeg.setChecked(True)
+            self.assertTrue(setup.cb_link_to_raw.isEnabled())
+            self.assertTrue(setup.cb_link_to_raw.isChecked())
+
+            # Test directory scan with JPEG preview selected
+            shoot_dir = os.path.join(self.temp_dir, "match_shoot")
+            os.makedirs(shoot_dir, exist_ok=True)
+            from PIL import Image
+            # Create synthetic RAW + JPEG pair
+            with open(os.path.join(shoot_dir, "MATCH_01.CR3"), "wb") as f:
+                f.write(b"RAWBYTES" * 100)
+            img = Image.new("RGB", (64, 64), color="blue")
+            img.save(os.path.join(shoot_dir, "MATCH_01.JPG"))
+
+            setup.source_dir_edit.setText(shoot_dir)
+            setup._rescan_items()
+
+            self.assertEqual(len(setup.scanned_items), 1)
+            item = setup.scanned_items[0]
+            # When preview_jpeg is selected, primary_path must be the JPEG path, but raw_path is kept!
+            self.assertTrue(item.primary_path.endswith(".JPG"))
+            self.assertTrue(item.raw_path.endswith(".CR3"))
+
+            # Test _start_session creates project with match mode and preview mode
+            setup.name_edit.setText("Championship Match")
+            created_ids = []
+            setup.session_created.connect(lambda pid: created_ids.append(pid))
+            setup._start_session()
+
+            self.assertEqual(len(created_ids), 1)
+            created = setup.created_project
+            self.assertIsNotNone(created)
+            self.assertTrue(created.is_match_mode)
+            self.assertEqual(created.max_selected_count, 15)
+            self.assertEqual(created.preview_mode, "jpeg")
+            self.assertTrue(created.link_to_raw)
+        finally:
+            config.set("experimental_mode", prev_exp)
+
+    def test_review_view_match_mode_quota_and_inspect_raw(self):
+        """Verify ReviewView real-time quota indicator and on-demand RAW inspect toggle."""
+        shoot_dir = os.path.join(self.temp_dir, "review_shoot")
+        os.makedirs(shoot_dir, exist_ok=True)
+        from PIL import Image
+        img_a = Image.new("RGB", (64, 64), color="red")
+        img_a.save(os.path.join(shoot_dir, "FRAME_01.JPG"))
+        raw_a_path = os.path.join(shoot_dir, "FRAME_01.CR3")
+        img_raw = Image.new("RGB", (64, 64), color="cyan")
+        img_raw.save(raw_a_path, format="JPEG")
+
+        img_b = Image.new("RGB", (64, 64), color="green")
+        img_b.save(os.path.join(shoot_dir, "FRAME_02.JPG"))
+
+        img_c = Image.new("RGB", (64, 64), color="yellow")
+        img_c.save(os.path.join(shoot_dir, "FRAME_03.JPG"))
+
+        item1 = PhotoItem(base_name="FRAME_01", primary_path=os.path.join(shoot_dir, "FRAME_01.JPG"),
+                          raw_path=raw_a_path, jpeg_path=os.path.join(shoot_dir, "FRAME_01.JPG"))
+        item2 = PhotoItem(base_name="FRAME_02", primary_path=os.path.join(shoot_dir, "FRAME_02.JPG"),
+                          jpeg_path=os.path.join(shoot_dir, "FRAME_02.JPG"))
+        item3 = PhotoItem(base_name="FRAME_03", primary_path=os.path.join(shoot_dir, "FRAME_03.JPG"),
+                          jpeg_path=os.path.join(shoot_dir, "FRAME_03.JPG"))
+
+        proj = Project(
+            name="Finals Shoot",
+            is_match_mode=True,
+            max_selected_count=2,
+            preview_mode="jpeg",
+            link_to_raw=True,
+            items=[item1, item2, item3],
+            current_index=0
+        )
+
+        review = ReviewView()
+        review.load_project(proj)
+
+        # Verify initial quota display
+        self.assertFalse(review.quota_badge.isHidden())
+        self.assertIn("QUOTA: 0 / 2", review.quota_badge.text())
+        self.assertFalse(review.inspect_raw_btn.isHidden())
+
+        # Select first photo
+        review.keep_current()
+        self.assertIn("QUOTA: 1 / 2", review.quota_badge.text())
+
+        # Select second photo (reaches quota)
+        review.keep_current()
+        self.assertIn("QUOTA REACHED: 2 / 2", review.quota_badge.text())
+
+        # Select third photo (over quota soft cap)
+        review.keep_current()
+        self.assertIn("OVER QUOTA: 3 / 2 (+1)", review.quota_badge.text())
+        self.assertTrue(proj.is_over_quota)
+
+        # Navigate back to item 0 which has linked raw
+        review.navigate_to(0)
+        self.assertFalse(review.is_inspecting_raw)
+        self.assertEqual(review.inspect_raw_btn.text(), "Inspect RAW (R)")
+
+        # Toggle inspect RAW
+        review._toggle_inspect_raw()
+        self.assertTrue(review.is_inspecting_raw)
+        self.assertEqual(review.inspect_raw_btn.text(), "Viewing RAW (R)")
+
+        # Toggle inspect RAW again to return to cached preview
+        review._toggle_inspect_raw()
+        self.assertFalse(review.is_inspecting_raw)
+        self.assertEqual(review.inspect_raw_btn.text(), "Inspect RAW (R)")
+
+        review.unload_project()
+
 
 if __name__ == "__main__":
-    unittest.main()
+    import unittest
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestLoupeWorkstation)
+    res = unittest.TextTestRunner(verbosity=2).run(suite)
+    import os
+    os._exit(0 if res.wasSuccessful() else 1)
+
 
 
 

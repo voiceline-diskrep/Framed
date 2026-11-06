@@ -54,6 +54,29 @@ class StatsPanel(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
+        # Match Mode Quota Card (Experimental)
+        self.quota_card = self._create_card()
+        q_layout = QVBoxLayout(self.quota_card)
+        q_layout.setSpacing(6)
+
+        q_title = QLabel("MATCH SELECTION QUOTA")
+        q_title.setFont(get_mono_font(10, bold=True))
+        q_title.setStyleSheet(f"color: {COLOR_ACCENT};")
+        q_layout.addWidget(q_title)
+
+        self.quota_val_lbl = QLabel("0 / 0 Selected")
+        self.quota_val_lbl.setFont(get_mono_font(13, bold=True))
+        self.quota_val_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        q_layout.addWidget(self.quota_val_lbl)
+
+        self.quota_status_lbl = QLabel("Within Quota")
+        self.quota_status_lbl.setFont(get_body_font(11))
+        self.quota_status_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        q_layout.addWidget(self.quota_status_lbl)
+
+        self.quota_card.setVisible(False)
+        layout.addWidget(self.quota_card)
+
         # Camera & Lens Card
         cam_card = self._create_card()
         cam_layout = QVBoxLayout(cam_card)
@@ -236,6 +259,29 @@ class StatsPanel(QFrame):
     def update_rejected_count(self, count: int):
         self.not_accepted_btn.setText(f"Not Accepted Photos ({count})")
 
+    def update_match_quota(self, selected_count: int, max_limit: int):
+        if max_limit <= 0:
+            self.quota_card.setVisible(False)
+            return
+
+        self.quota_card.setVisible(True)
+        self.quota_val_lbl.setText(f"{selected_count} / {max_limit} Photos")
+
+        if selected_count > max_limit:
+            over = selected_count - max_limit
+            self.quota_status_lbl.setText(f"Over quota by {over} photo{'s' if over > 1 else ''}")
+            self.quota_status_lbl.setStyleSheet("color: #F87171; font-weight: bold;")
+            self.quota_val_lbl.setStyleSheet("color: #F87171; font-weight: bold;")
+        elif selected_count == max_limit:
+            self.quota_status_lbl.setText("Target quota reached (100%)")
+            self.quota_status_lbl.setStyleSheet(f"color: {COLOR_ACCENT}; font-weight: bold;")
+            self.quota_val_lbl.setStyleSheet(f"color: {COLOR_ACCENT}; font-weight: bold;")
+        else:
+            rem = max_limit - selected_count
+            self.quota_status_lbl.setText(f"{rem} remaining to target")
+            self.quota_status_lbl.setStyleSheet("color: #6EE7B7;")
+            self.quota_val_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+
     def reset_telemetry(self):
         """Reset all optical telemetry readouts to clean blank state."""
         self.camera_lbl.setText("—")
@@ -257,6 +303,7 @@ class StatsPanel(QFrame):
         self.size_lbl.setText("—")
         self.filename_lbl.setText("—")
         self.update_rejected_count(0)
+        self.update_match_quota(0, 0)
 
     def _on_zoom_setting_changed(self):
         enabled = self.start_zoomed_cb.isChecked()

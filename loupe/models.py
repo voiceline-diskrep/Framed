@@ -73,6 +73,10 @@ class Project:
     edited_files: List[str] = field(default_factory=list)
     media_type: str = "photo"  # "photo" or "video"
     view_uncompressed: bool = False
+    is_match_mode: bool = False
+    max_selected_count: int = 0
+    preview_mode: str = "raw"  # "raw" or "jpeg"
+    link_to_raw: bool = True
 
     @property
     def edited_count(self) -> int:
@@ -135,6 +139,16 @@ class Project:
             return "Completed"
         term = "sorted" if self.media_type == "video" else "culled"
         return f"In Progress ({culled}/{len(self.items)} {term})"
+
+    @property
+    def is_over_quota(self) -> bool:
+        return bool(self.is_match_mode and self.max_selected_count > 0 and self.selected_count > self.max_selected_count)
+
+    @property
+    def quota_remaining(self) -> int:
+        if not self.is_match_mode or self.max_selected_count <= 0:
+            return 0
+        return max(0, self.max_selected_count - self.selected_count)
 
     def get_workspace_name(self) -> str:
         """Returns the human-readable name of the workspace folder this project belongs to."""

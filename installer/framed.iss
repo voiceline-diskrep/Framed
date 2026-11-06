@@ -2,7 +2,7 @@
 
 #define MyAppName "Framed"
 #define MyAppFullName "Framed Photo Inspection & Culling Workstation"
-#define MyAppVersion "1.3.0-experimental"
+#define MyAppVersion "1.3.1-experimental"
 #define MyAppPublisher "Framed Optical"
 #define MyAppExeName "Framed.exe"
 
@@ -15,7 +15,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=Framed-Setup-v1.3.0-experimental
+OutputBaseFilename=Framed-Setup-v1.3.1-experimental
 SetupIconFile=..\loupe\resources\icons\app_icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes

@@ -367,15 +367,15 @@ class SettingsDialog(QDialog):
         l_exp.addWidget(t_exp)
 
         desc_exp = QLabel(
-            "Enable experimental workstation features (such as direct Google Drive Cloud Import/Export) "
-            "and receive GitHub Pre-release updates."
+            "Enable experimental workstation features (such as Match Pictures photo quotas, Low-RAM JPEG Preview with linked RAW originals, "
+            "and Google Drive Cloud Integration) and receive GitHub Pre-release updates."
         )
         desc_exp.setFont(get_body_font(12))
         desc_exp.setWordWrap(True)
         desc_exp.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         l_exp.addWidget(desc_exp)
 
-        self.cb_experimental = QCheckBox("Enable Experimental Mode (Unlocks Google Drive Cloud & Pre-Release Channel)")
+        self.cb_experimental = QCheckBox("Enable Experimental Mode (Unlocks Match Pictures, Low-RAM Preview & Pre-Releases)")
         self.cb_experimental.setFont(get_body_font(12, bold=True))
         self.cb_experimental.toggled.connect(self._on_experimental_toggled)
         l_exp.addWidget(self.cb_experimental)

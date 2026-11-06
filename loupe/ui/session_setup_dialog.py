@@ -336,6 +336,109 @@ class SessionSetupView(QWidget):
 
         center_layout.addWidget(self.sec3)
 
+        # Section 3B: Preview Engine & Memory Optimization (Experimental)
+        self.sec_preview_engine = self._create_card()
+        sec_pe_layout = QVBoxLayout(self.sec_preview_engine)
+        sec_pe_layout.setSpacing(10)
+
+        sec_pe_title = QLabel("PREVIEW ENGINE & MEMORY OPTIMIZATION")
+        sec_pe_title.setFont(get_mono_font(11, bold=True))
+        sec_pe_title.setStyleSheet(f"color: {COLOR_ACCENT};")
+        sec_pe_layout.addWidget(sec_pe_title)
+
+        pe_desc = QLabel(
+            "Choose whether to decode full sensor RAWs or use companion JPEGs for lightweight memory consumption."
+        )
+        pe_desc.setFont(get_body_font(12))
+        pe_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
+        sec_pe_layout.addWidget(pe_desc)
+
+        self.preview_group = QButtonGroup(self)
+        self.rb_preview_raw = QRadioButton("Full RAW Decode (High Fidelity, Higher RAM)")
+        self.rb_preview_jpeg = QRadioButton("JPEG Preview (Fast, Low RAM — Recommended for lower-spec machines)")
+        self.rb_preview_raw.setChecked(True)
+        self.preview_group.addButton(self.rb_preview_raw, 1)
+        self.preview_group.addButton(self.rb_preview_jpeg, 2)
+        self.preview_group.idClicked.connect(lambda _: self._on_preview_engine_changed())
+
+        sec_pe_layout.addWidget(self.rb_preview_raw)
+        sec_pe_layout.addWidget(self.rb_preview_jpeg)
+
+        self.cb_link_to_raw = QCheckBox("Link Selections to RAW Originals")
+        self.cb_link_to_raw.setChecked(True)
+        self.cb_link_to_raw.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 500;")
+        sec_pe_layout.addWidget(self.cb_link_to_raw)
+
+        link_desc = QLabel(
+            "When using JPEG Preview, keeping this enabled ensures selections, companion sync, and final exports link to the camera RAW originals."
+        )
+        link_desc.setFont(get_body_font(11))
+        link_desc.setWordWrap(True)
+        link_desc.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        sec_pe_layout.addWidget(link_desc)
+
+        center_layout.addWidget(self.sec_preview_engine)
+
+        # Section 3C: Match Pictures Mode (Selection Quota - Experimental)
+        self.sec_match_mode = self._create_card()
+        sec_mm_layout = QVBoxLayout(self.sec_match_mode)
+        sec_mm_layout.setSpacing(10)
+
+        sec_mm_title = QLabel("MATCH PICTURES MODE")
+        sec_mm_title.setFont(get_mono_font(11, bold=True))
+        sec_mm_title.setStyleSheet(f"color: {COLOR_ACCENT};")
+        sec_mm_layout.addWidget(sec_mm_title)
+
+        self.cb_match_mode = QCheckBox("Enable Match Mode (Photo Selection Quota)")
+        self.cb_match_mode.setChecked(False)
+        self.cb_match_mode.toggled.connect(self._on_match_mode_toggled)
+        sec_mm_layout.addWidget(self.cb_match_mode)
+
+        mm_desc = QLabel(
+            "Sets an upper photo selection quota to streamline fast turnarounds for sports and live event coverage."
+        )
+        mm_desc.setFont(get_body_font(12))
+        mm_desc.setWordWrap(True)
+        mm_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
+        sec_mm_layout.addWidget(mm_desc)
+
+        self.match_limit_container = QWidget()
+        ml_layout = QHBoxLayout(self.match_limit_container)
+        ml_layout.setContentsMargins(0, 4, 0, 0)
+        ml_layout.setSpacing(12)
+
+        lbl_limit = QLabel("Target Photo Quota:")
+        lbl_limit.setFont(get_body_font(12))
+        lbl_limit.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        ml_layout.addWidget(lbl_limit)
+
+        self.sb_match_limit = QSpinBox()
+        self.sb_match_limit.setRange(1, 9999)
+        self.sb_match_limit.setValue(25)
+        self.sb_match_limit.setSuffix(" photos")
+        self.sb_match_limit.setMinimumHeight(36)
+        self.sb_match_limit.setFixedWidth(140)
+        self.sb_match_limit.setFont(get_mono_font(12, bold=True))
+        self.sb_match_limit.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+                padding: 4px 8px;
+            }}
+            QSpinBox:focus {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        ml_layout.addWidget(self.sb_match_limit)
+        ml_layout.addStretch()
+
+        self.match_limit_container.setVisible(False)
+        sec_mm_layout.addWidget(self.match_limit_container)
+
+        center_layout.addWidget(self.sec_match_mode)
+
         # Section 4: RAM Budget & Preloading
         sec4 = self._create_card()
         sec4_layout = QVBoxLayout(sec4)
@@ -486,9 +589,24 @@ class SessionSetupView(QWidget):
         self._update_format_visibility()
         self._rescan_items()
 
+    def _on_preview_engine_changed(self):
+        is_jpeg = self.rb_preview_jpeg.isChecked()
+        self.cb_link_to_raw.setEnabled(is_jpeg)
+        self._rescan_items()
+        ram_alloc = self.ram_slider.value()
+        self._update_batch_calc(ram_alloc)
+
+    def _on_match_mode_toggled(self, checked: bool):
+        self.match_limit_container.setVisible(checked)
+
     def _update_format_visibility(self):
         is_both = self.rb_both.isChecked()
         self.sec3.setVisible(is_both)
+        exp_on = bool(config.get("experimental_mode", False))
+        if hasattr(self, "sec_preview_engine"):
+            self.sec_preview_engine.setVisible(exp_on and is_both)
+        if hasattr(self, "sec_match_mode"):
+            self.sec_match_mode.setVisible(exp_on)
 
     def _on_source_dir_text_changed(self, text: str):
         d = text.strip()
@@ -594,7 +712,12 @@ class SessionSetupView(QWidget):
             elif fmt_mode == "jpeg_only":
                 primary = j_path
             else:
-                primary = r_path if r_path else j_path
+                exp_on = bool(config.get("experimental_mode", False))
+                use_jpeg_preview = exp_on and hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
+                if use_jpeg_preview and j_path:
+                    primary = j_path
+                else:
+                    primary = r_path if r_path else j_path
 
             item = PhotoItem(
                 base_name=stem,
@@ -648,7 +771,9 @@ class SessionSetupView(QWidget):
         self._update_batch_calc(val_mb)
 
     def _update_batch_calc(self, ram_mb: int):
-        avg_photo_mb = 75
+        exp_on = bool(config.get("experimental_mode", False))
+        is_jpeg_preview = exp_on and hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
+        avg_photo_mb = 18 if is_jpeg_preview else 75
         ram_capacity = max(4, int(ram_mb / avg_photo_mb))
         self.calculated_batch_size = ram_capacity
 
@@ -676,7 +801,23 @@ class SessionSetupView(QWidget):
     def reset_form(self):
         """Reset form fields when opening a new session."""
         self._populate_folders()
-        self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+        exp_on = bool(config.get("experimental_mode", False))
+        self.gdrive_btn.setVisible(exp_on)
+        if hasattr(self, "sec_preview_engine"):
+            self.sec_preview_engine.setVisible(exp_on and self.rb_both.isChecked())
+        if hasattr(self, "sec_match_mode"):
+            self.sec_match_mode.setVisible(exp_on)
+        if hasattr(self, "cb_match_mode"):
+            self.cb_match_mode.setChecked(False)
+        if hasattr(self, "match_limit_container"):
+            self.match_limit_container.setVisible(False)
+        if hasattr(self, "sb_match_limit"):
+            self.sb_match_limit.setValue(25)
+        if hasattr(self, "rb_preview_raw"):
+            self.rb_preview_raw.setChecked(True)
+        if hasattr(self, "cb_link_to_raw"):
+            self.cb_link_to_raw.setChecked(True)
+
         self.source_dir_edit.blockSignals(True)
         self.source_dir_edit.setText("")
         self.source_dir_edit.blockSignals(False)
@@ -714,6 +855,13 @@ class SessionSetupView(QWidget):
         sync_pairs = self.sync_checkbox.isChecked() if fmt_mode == "both" else False
         ram_alloc = self.ram_slider.value()
 
+        exp_on = bool(config.get("experimental_mode", False))
+        is_match = bool(exp_on and hasattr(self, "cb_match_mode") and self.cb_match_mode.isChecked())
+        match_limit = self.sb_match_limit.value() if is_match else 0
+        use_jpeg_preview = bool(exp_on and hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked())
+        preview_mode = "jpeg" if use_jpeg_preview else "raw"
+        link_to_raw = self.cb_link_to_raw.isChecked() if (exp_on and hasattr(self, "cb_link_to_raw")) else True
+
         project = Project(
             name=name,
             folder_id=fid,
@@ -723,7 +871,11 @@ class SessionSetupView(QWidget):
             ram_allocation_mb=ram_alloc,
             batch_size=getattr(self, "calculated_batch_size", 16),
             shoot_date=self.date_edit.date().toString("yyyy-MM-dd"),
-            items=self.scanned_items
+            items=self.scanned_items,
+            is_match_mode=is_match,
+            max_selected_count=match_limit,
+            preview_mode=preview_mode,
+            link_to_raw=link_to_raw
         )
         storage.save_project(project)
         self.created_project = project

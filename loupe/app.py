@@ -171,6 +171,8 @@ class FramedMainWindow(QMainWindow):
         exp_on = bool(config.get("experimental_mode", False))
         if hasattr(self.photo_setup_view, "gdrive_btn"):
             self.photo_setup_view.gdrive_btn.setVisible(exp_on)
+        if hasattr(self.photo_setup_view, "_update_format_visibility"):
+            self.photo_setup_view._update_format_visibility()
         if hasattr(self.video_setup_view, "gdrive_btn"):
             self.video_setup_view.gdrive_btn.setVisible(exp_on)
 
