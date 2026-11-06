@@ -312,36 +312,12 @@ class SessionSetupView(QWidget):
 
         # Section 3: Pair Synchronization
         self.sec3 = self._create_card()
-        sec3_layout = QVBoxLayout(self.sec3)
-        sec3_layout.setSpacing(10)
-
-        sec3_title = QLabel("3. RAW & JPEG PAIR SYNCHRONIZATION")
-        sec3_title.setFont(get_mono_font(11, bold=True))
-        sec3_title.setStyleSheet(f"color: {COLOR_ACCENT};")
-        sec3_layout.addWidget(sec3_title)
-
-        self.sync_checkbox = QCheckBox("Synchronize matching RAW and JPEG pairs")
-        self.sync_checkbox.setChecked(config.get("default_sync_pairs", True))
-        sec3_layout.addWidget(self.sync_checkbox)
-
-        sync_desc = QLabel(
-            "Matching files usually share a filename and differ only by extension "
-            "(e.g., DSC0102.ARW and DSC0102.JPG). With sync on, deleting or rejecting a RAW "
-            "also rejects its matching JPEG, and the reverse. Sync never permanently deletes any original files."
-        )
-        sync_desc.setFont(get_body_font(12))
-        sync_desc.setWordWrap(True)
-        sync_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
-        sec3_layout.addWidget(sync_desc)
-
-        center_layout.addWidget(self.sec3)
-
-        # Section 3B: Preview Engine & Memory Optimization (Experimental)
+        # Section 3: Preview Engine & Memory Optimization
         self.sec_preview_engine = self._create_card()
         sec_pe_layout = QVBoxLayout(self.sec_preview_engine)
         sec_pe_layout.setSpacing(10)
 
-        sec_pe_title = QLabel("PREVIEW ENGINE & MEMORY OPTIMIZATION")
+        sec_pe_title = QLabel("3. PREVIEW ENGINE & MEMORY OPTIMIZATION")
         sec_pe_title.setFont(get_mono_font(11, bold=True))
         sec_pe_title.setStyleSheet(f"color: {COLOR_ACCENT};")
         sec_pe_layout.addWidget(sec_pe_title)
@@ -379,12 +355,38 @@ class SessionSetupView(QWidget):
 
         center_layout.addWidget(self.sec_preview_engine)
 
-        # Section 3C: Match Pictures Mode (Selection Quota - Experimental)
+        # Section 4: Pair Synchronization
+        self.sec3 = self._create_card()
+        sec3_layout = QVBoxLayout(self.sec3)
+        sec3_layout.setSpacing(10)
+
+        sec3_title = QLabel("4. RAW & JPEG PAIR SYNCHRONIZATION")
+        sec3_title.setFont(get_mono_font(11, bold=True))
+        sec3_title.setStyleSheet(f"color: {COLOR_ACCENT};")
+        sec3_layout.addWidget(sec3_title)
+
+        self.sync_checkbox = QCheckBox("Synchronize matching RAW and JPEG pairs")
+        self.sync_checkbox.setChecked(config.get("default_sync_pairs", True))
+        sec3_layout.addWidget(self.sync_checkbox)
+
+        sync_desc = QLabel(
+            "Matching files usually share a filename and differ only by extension "
+            "(e.g., DSC0102.ARW and DSC0102.JPG). With sync on, deleting or rejecting a RAW "
+            "also rejects its matching JPEG, and the reverse. Sync never permanently deletes any original files."
+        )
+        sync_desc.setFont(get_body_font(12))
+        sync_desc.setWordWrap(True)
+        sync_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
+        sec3_layout.addWidget(sync_desc)
+
+        center_layout.addWidget(self.sec3)
+
+        # Section 5: Match Pictures Mode (Selection Quota)
         self.sec_match_mode = self._create_card()
         sec_mm_layout = QVBoxLayout(self.sec_match_mode)
         sec_mm_layout.setSpacing(10)
 
-        sec_mm_title = QLabel("MATCH PICTURES MODE")
+        sec_mm_title = QLabel("5. MATCH PICTURES MODE (QUOTA LIMIT)")
         sec_mm_title.setFont(get_mono_font(11, bold=True))
         sec_mm_title.setStyleSheet(f"color: {COLOR_ACCENT};")
         sec_mm_layout.addWidget(sec_mm_title)
@@ -439,12 +441,12 @@ class SessionSetupView(QWidget):
 
         center_layout.addWidget(self.sec_match_mode)
 
-        # Section 4: RAM Budget & Preloading
+        # Section 6: RAM Budget & Preloading
         sec4 = self._create_card()
         sec4_layout = QVBoxLayout(sec4)
         sec4_layout.setSpacing(12)
 
-        sec4_title = QLabel("4. MEMORY BUFFER & PRELOADING BUDGET")
+        sec4_title = QLabel("6. MEMORY BUFFER & PRELOADING BUDGET")
         sec4_title.setFont(get_mono_font(11, bold=True))
         sec4_title.setStyleSheet(f"color: {COLOR_ACCENT};")
         sec4_layout.addWidget(sec4_title)
@@ -602,11 +604,10 @@ class SessionSetupView(QWidget):
     def _update_format_visibility(self):
         is_both = self.rb_both.isChecked()
         self.sec3.setVisible(is_both)
-        exp_on = bool(config.get("experimental_mode", False))
         if hasattr(self, "sec_preview_engine"):
-            self.sec_preview_engine.setVisible(exp_on and is_both)
+            self.sec_preview_engine.setVisible(is_both)
         if hasattr(self, "sec_match_mode"):
-            self.sec_match_mode.setVisible(exp_on)
+            self.sec_match_mode.setVisible(True)
 
     def _on_source_dir_text_changed(self, text: str):
         d = text.strip()
@@ -712,8 +713,7 @@ class SessionSetupView(QWidget):
             elif fmt_mode == "jpeg_only":
                 primary = j_path
             else:
-                exp_on = bool(config.get("experimental_mode", False))
-                use_jpeg_preview = exp_on and hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
+                use_jpeg_preview = hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
                 if use_jpeg_preview and j_path:
                     primary = j_path
                 else:
@@ -771,8 +771,7 @@ class SessionSetupView(QWidget):
         self._update_batch_calc(val_mb)
 
     def _update_batch_calc(self, ram_mb: int):
-        exp_on = bool(config.get("experimental_mode", False))
-        is_jpeg_preview = exp_on and hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
+        is_jpeg_preview = hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
         avg_photo_mb = 18 if is_jpeg_preview else 75
         ram_capacity = max(4, int(ram_mb / avg_photo_mb))
         self.calculated_batch_size = ram_capacity
@@ -804,9 +803,9 @@ class SessionSetupView(QWidget):
         exp_on = bool(config.get("experimental_mode", False))
         self.gdrive_btn.setVisible(exp_on)
         if hasattr(self, "sec_preview_engine"):
-            self.sec_preview_engine.setVisible(exp_on and self.rb_both.isChecked())
+            self.sec_preview_engine.setVisible(self.rb_both.isChecked())
         if hasattr(self, "sec_match_mode"):
-            self.sec_match_mode.setVisible(exp_on)
+            self.sec_match_mode.setVisible(True)
         if hasattr(self, "cb_match_mode"):
             self.cb_match_mode.setChecked(False)
         if hasattr(self, "match_limit_container"):
@@ -855,12 +854,11 @@ class SessionSetupView(QWidget):
         sync_pairs = self.sync_checkbox.isChecked() if fmt_mode == "both" else False
         ram_alloc = self.ram_slider.value()
 
-        exp_on = bool(config.get("experimental_mode", False))
-        is_match = bool(exp_on and hasattr(self, "cb_match_mode") and self.cb_match_mode.isChecked())
+        is_match = bool(hasattr(self, "cb_match_mode") and self.cb_match_mode.isChecked())
         match_limit = self.sb_match_limit.value() if is_match else 0
-        use_jpeg_preview = bool(exp_on and hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked())
+        use_jpeg_preview = bool(hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked())
         preview_mode = "jpeg" if use_jpeg_preview else "raw"
-        link_to_raw = self.cb_link_to_raw.isChecked() if (exp_on and hasattr(self, "cb_link_to_raw")) else True
+        link_to_raw = self.cb_link_to_raw.isChecked() if hasattr(self, "cb_link_to_raw") else True
 
         project = Project(
             name=name,

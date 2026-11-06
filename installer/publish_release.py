@@ -14,13 +14,13 @@ def get_token():
     raise ValueError("GitHub token not found in git credential manager")
 
 def publish_release(
-    tag: str = "v1.3.1-experimental",
-    target_branch: str = "experimental",
-    prerelease: bool = True
+    tag: str = "v1.3.0",
+    target_branch: str = "master",
+    prerelease: bool = False
 ):
     token = get_token()
     repo = "voiceline-diskrep/Framed"
-    name = "Framed v1.3.1-experimental — Match Pictures Mode & Low-RAM JPEG Preview"
+    name = "Framed v1.3.0 — Match Pictures Mode & Low-RAM JPEG Preview"
     body = (
         "## 🧪 Framed v1.3.0-experimental (Pre-Release)\n\n"
         "> **Note:** This is an **Experimental Pre-Release** build on the `experimental` branch. "

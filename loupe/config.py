@@ -24,7 +24,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "theme_mode": "dark",
     "auto_check_updates": True,
     "update_manifest_url": "https://api.github.com/repos/voiceline-diskrep/Framed/releases/latest",
-    "app_version": "1.3.1-experimental",
+    "app_version": "1.3.0",
     "experimental_mode": False,
     "gdrive_client_id": "",
     "gdrive_client_secret": "",

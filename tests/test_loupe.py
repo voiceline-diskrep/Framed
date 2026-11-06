@@ -996,68 +996,66 @@ class TestLoupeWorkstation(unittest.TestCase):
         self.assertTrue(restored.is_over_quota)
 
     def test_session_setup_match_mode_and_preview_engine(self):
-        """Verify SessionSetupView controls for Match Mode and Preview Engine when experimental_mode is toggled."""
+        """Verify SessionSetupView controls for Match Mode and Preview Engine as standard workstation features."""
         from loupe.ui.session_setup_dialog import SessionSetupView
-        prev_exp = config.get("experimental_mode", False)
-        try:
-            # 1. Experimental Mode OFF: Cards must be hidden
-            config.set("experimental_mode", False)
-            setup = SessionSetupView()
-            setup.reset_form()
-            self.assertTrue(setup.sec_match_mode.isHidden())
-            self.assertTrue(setup.sec_preview_engine.isHidden())
+        setup = SessionSetupView()
+        setup.reset_form()
 
-            # 2. Experimental Mode ON: Cards must be visible
-            config.set("experimental_mode", True)
-            setup.reset_form()
-            self.assertFalse(setup.sec_match_mode.isHidden())
-            self.assertFalse(setup.sec_preview_engine.isHidden())
+        # Both cards are standard features available directly
+        self.assertFalse(setup.sec_match_mode.isHidden())
+        self.assertFalse(setup.sec_preview_engine.isHidden())
 
-            # Test Match Mode toggle
-            self.assertTrue(setup.match_limit_container.isHidden())
-            setup.cb_match_mode.setChecked(True)
-            self.assertFalse(setup.match_limit_container.isHidden())
-            setup.sb_match_limit.setValue(15)
+        # Test format switching: raw_only hides preview engine, both shows it
+        setup.rb_raw.setChecked(True)
+        setup._update_format_visibility()
+        self.assertTrue(setup.sec_preview_engine.isHidden())
+        setup.rb_both.setChecked(True)
+        setup._update_format_visibility()
+        self.assertFalse(setup.sec_preview_engine.isHidden())
 
-            # Test Preview Engine toggle
-            setup.rb_preview_jpeg.setChecked(True)
-            self.assertTrue(setup.cb_link_to_raw.isEnabled())
-            self.assertTrue(setup.cb_link_to_raw.isChecked())
+        # Test Match Mode toggle
+        self.assertTrue(setup.match_limit_container.isHidden())
+        setup.cb_match_mode.setChecked(True)
+        self.assertFalse(setup.match_limit_container.isHidden())
+        setup.sb_match_limit.setValue(15)
 
-            # Test directory scan with JPEG preview selected
-            shoot_dir = os.path.join(self.temp_dir, "match_shoot")
-            os.makedirs(shoot_dir, exist_ok=True)
-            from PIL import Image
-            # Create synthetic RAW + JPEG pair
-            with open(os.path.join(shoot_dir, "MATCH_01.CR3"), "wb") as f:
-                f.write(b"RAWBYTES" * 100)
-            img = Image.new("RGB", (64, 64), color="blue")
-            img.save(os.path.join(shoot_dir, "MATCH_01.JPG"))
+        # Test Preview Engine toggle
+        setup.rb_preview_jpeg.setChecked(True)
+        self.assertTrue(setup.cb_link_to_raw.isEnabled())
+        self.assertTrue(setup.cb_link_to_raw.isChecked())
 
-            setup.source_dir_edit.setText(shoot_dir)
-            setup._rescan_items()
+        # Test directory scan with JPEG preview selected
+        shoot_dir = os.path.join(self.temp_dir, "match_shoot")
+        os.makedirs(shoot_dir, exist_ok=True)
+        from PIL import Image
+        # Create synthetic RAW + JPEG pair
+        with open(os.path.join(shoot_dir, "MATCH_01.CR3"), "wb") as f:
+            f.write(b"RAWBYTES" * 100)
+        img = Image.new("RGB", (64, 64), color="blue")
+        img.save(os.path.join(shoot_dir, "MATCH_01.JPG"))
 
-            self.assertEqual(len(setup.scanned_items), 1)
-            item = setup.scanned_items[0]
-            # When preview_jpeg is selected, primary_path must be the JPEG path, but raw_path is kept!
-            self.assertTrue(item.primary_path.endswith(".JPG"))
-            self.assertTrue(item.raw_path.endswith(".CR3"))
+        setup.source_dir_edit.setText(shoot_dir)
+        setup._rescan_items()
 
-            # Test _start_session creates project with match mode and preview mode
-            setup.name_edit.setText("Championship Match")
-            created_ids = []
-            setup.session_created.connect(lambda pid: created_ids.append(pid))
-            setup._start_session()
+        self.assertEqual(len(setup.scanned_items), 1)
+        item = setup.scanned_items[0]
+        # When preview_jpeg is selected, primary_path must be the JPEG path, but raw_path is kept!
+        self.assertTrue(item.primary_path.endswith(".JPG"))
+        self.assertTrue(item.raw_path.endswith(".CR3"))
 
-            self.assertEqual(len(created_ids), 1)
-            created = setup.created_project
-            self.assertIsNotNone(created)
-            self.assertTrue(created.is_match_mode)
-            self.assertEqual(created.max_selected_count, 15)
-            self.assertEqual(created.preview_mode, "jpeg")
-            self.assertTrue(created.link_to_raw)
-        finally:
-            config.set("experimental_mode", prev_exp)
+        # Test _start_session creates project with match mode and preview mode
+        setup.name_edit.setText("Championship Match")
+        created_ids = []
+        setup.session_created.connect(lambda pid: created_ids.append(pid))
+        setup._start_session()
+
+        self.assertEqual(len(created_ids), 1)
+        created = setup.created_project
+        self.assertIsNotNone(created)
+        self.assertTrue(created.is_match_mode)
+        self.assertEqual(created.max_selected_count, 15)
+        self.assertEqual(created.preview_mode, "jpeg")
+        self.assertTrue(created.link_to_raw)
 
     def test_review_view_match_mode_quota_and_inspect_raw(self):
         """Verify ReviewView real-time quota indicator and on-demand RAW inspect toggle."""
