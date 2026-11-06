@@ -1,7 +1,7 @@
 {
-  "version": "1.3.0",
+  "version": "1.3.1",
   "prerelease": false,
   "release_date": "2026-11-06",
-  "download_url": "https://github.com/voiceline-diskrep/Framed/releases/download/v1.3.0/Framed-Setup-v1.3.0.exe",
-  "release_notes": "• Match Pictures Mode: Photo selection quota for fast sports and live event turnarounds with real-time over-quota warnings\n• Preview Engine & Memory Optimization: Low-RAM JPEG Preview with linked RAW originals and on-demand RAW inspection (R)\n• In-App Google Drive Cloud Integration (OAuth 2.0) under Preferences > Experimental Mode"
+  "download_url": "https://github.com/voiceline-diskrep/Framed/releases/download/v1.3.0/Framed-Setup-v1.3.1.exe",
+  "release_notes": "• Dashboard Cloud Quick Access: Direct 1-click Google Drive button in top navigation bar\n• Promoted Feature Toggles: Experimental & Cloud Features moved to top of Preferences with instant 1-click sign-in\n• Seamless Cloud Ingest: Direct Google Sign-In prompt in Session Setup and Export without hunting in settings\n• Match Pictures & Preview Engine: Standardized selection quotas and low-RAM JPEG previews with linked RAWs"
 }

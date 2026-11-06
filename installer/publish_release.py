@@ -14,15 +14,15 @@ def get_token():
     raise ValueError("GitHub token not found in git credential manager")
 
 def publish_release(
-    tag: str = "v1.3.0",
+    tag: str = "v1.3.1",
     target_branch: str = "master",
     prerelease: bool = False
 ):
     token = get_token()
     repo = "voiceline-diskrep/Framed"
-    name = "Framed v1.3.0 — Match Pictures Mode & Low-RAM JPEG Preview"
+    name = "Framed v1.3.1 — Dashboard Cloud Access & Simplified Feature Toggles"
     body = (
-        "## What's Changed in Framed v1.3.0\n\n"
+        "## What's Changed in Framed v1.3.1\n\n"
         "### 📸 Match Pictures Mode (Selection Quota)\n"
         "* **Selection Quota Limit**: Sets an upper photo selection quota in Session Setup to streamline high-speed turnarounds for sports and live event coverage.\n"
         "* **Real-Time Quota Badge**: Live status indicator in the review navigation bar: Under Quota (green), At Quota (amber), and Over Quota (red warning capsule).\n"

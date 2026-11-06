@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QListWidget, QListWidgetItem, QProgressBar, QFrame, QMessageBox,
-    QInputDialog, QApplication
+    QInputDialog, QApplication, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal
 
@@ -540,3 +540,363 @@ class GDriveBrowserDialog(QDialog):
             self.dl_worker.cancel()
             self.dl_worker.wait(1500)
         self.reject()
+
+
+class GDriveSignInPromptDialog(QDialog):
+    """Clean 1-click Google Sign-In modal when attempting cloud operations while not logged in."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Connect Google Drive")
+        self.setFixedSize(500, 300)
+        self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
+        self.auth_worker = None
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 26, 28, 24)
+        layout.setSpacing(14)
+
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(render_icon("cloud", 24, COLOR_ACCENT).pixmap(24, 24))
+        header.addWidget(icon_lbl)
+
+        title_v = QVBoxLayout()
+        title_v.setSpacing(2)
+        title = QLabel("Sign in to Google Drive")
+        title.setFont(get_display_font(16, bold=True))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        title_v.addWidget(title)
+
+        sub = QLabel("1-Click browser authentication via secure OAuth 2.0 loopback.")
+        sub.setFont(get_body_font(11))
+        sub.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        title_v.addWidget(sub)
+        header.addLayout(title_v)
+        header.addStretch()
+        layout.addLayout(header)
+
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 12px;
+            }}
+        """)
+        c_layout = QVBoxLayout(card)
+        c_layout.setSpacing(6)
+        desc = QLabel(
+            "Connecting your Google Drive enables zero-friction cloud imports directly "
+            "into your workspace cache, and high-speed multi-threaded cloud exports."
+        )
+        desc.setFont(get_body_font(12))
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; line-height: 1.4;")
+        c_layout.addWidget(desc)
+        layout.addWidget(card)
+
+        self.status_lbl = QLabel("")
+        self.status_lbl.setFont(get_mono_font(11))
+        self.status_lbl.setStyleSheet(f"color: {COLOR_ACCENT};")
+        layout.addWidget(self.status_lbl)
+
+        layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setFont(get_body_font(12))
+        self.btn_cancel.setMinimumHeight(38)
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 16px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+            }}
+        """)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        btn_layout.addStretch()
+
+        self.btn_signin = QPushButton("Sign in with Google")
+        self.btn_signin.setFont(get_body_font(12, bold=True))
+        self.btn_signin.setIcon(render_icon("cloud", 14, "#FFFFFF"))
+        self.btn_signin.setMinimumHeight(38)
+        self.btn_signin.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 20px;
+                background-color: #D97706;
+                color: #FFFFFF;
+                border: 1px solid #F59E0B;
+                border-radius: 3px;
+            }}
+            QPushButton:hover {{
+                background-color: #F59E0B;
+            }}
+            QPushButton:disabled {{
+                background-color: #374151;
+                border-color: #4B5563;
+                color: #9CA3AF;
+            }}
+        """)
+        self.btn_signin.clicked.connect(self._start_signin)
+        btn_layout.addWidget(self.btn_signin)
+
+        layout.addLayout(btn_layout)
+
+    def _start_signin(self):
+        from loupe.core.gdrive import GDriveAuthWorker
+        self.btn_signin.setEnabled(False)
+        self.status_lbl.setText("Waiting for Google Sign-In in your default web browser...")
+        self.status_lbl.setStyleSheet(f"color: {COLOR_ACCENT};")
+        self.auth_worker = GDriveAuthWorker(self)
+        self.auth_worker.auth_finished.connect(self._on_auth_finished)
+        self.auth_worker.start()
+
+    def _on_auth_finished(self, success: bool, email: str, err: str):
+        self.btn_signin.setEnabled(True)
+        if success:
+            QMessageBox.information(self, "Connected", f"Connected to Google Drive as: {email}")
+            self.accept()
+        else:
+            self.status_lbl.setText("Sign-in cancelled or failed.")
+            self.status_lbl.setStyleSheet(f"color: {COLOR_STATUS_REJECTED};")
+            QMessageBox.warning(self, "Google Sign-In", f"Sign-in could not be completed:\n{err}")
+
+
+class GDriveManagerDialog(QDialog):
+    """Direct Dashboard modal to view and manage Google Drive connection, cloud features, and preferences."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Google Drive & Workstation Features")
+        self.setFixedSize(560, 480)
+        self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
+        self.client = GoogleDriveClient()
+        self.auth_worker = None
+        self._init_ui()
+        self._refresh_status()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 26, 28, 24)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(render_icon("cloud", 24, COLOR_ACCENT).pixmap(24, 24))
+        header.addWidget(icon_lbl)
+
+        title_v = QVBoxLayout()
+        title_v.setSpacing(2)
+        title = QLabel("Google Drive & Cloud Features")
+        title.setFont(get_display_font(17, bold=True))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        title_v.addWidget(title)
+
+        sub = QLabel("Multi-threaded cloud import/export and high-speed sports culling.")
+        sub.setFont(get_body_font(11))
+        sub.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        title_v.addWidget(sub)
+        header.addLayout(title_v)
+        header.addStretch()
+        layout.addLayout(header)
+
+        card_acc = QFrame()
+        card_acc.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 14px;
+            }}
+        """)
+        acc_layout = QVBoxLayout(card_acc)
+        acc_layout.setSpacing(10)
+
+        acc_title = QLabel("GOOGLE DRIVE ACCOUNT")
+        acc_title.setFont(get_mono_font(10, bold=True))
+        acc_title.setStyleSheet(f"color: {COLOR_ACCENT};")
+        acc_layout.addWidget(acc_title)
+
+        self.acc_row = QHBoxLayout()
+        self.acc_row.setSpacing(10)
+
+        self.lbl_acc_status = QLabel("Checking status...")
+        self.lbl_acc_status.setFont(get_body_font(12, bold=True))
+        self.lbl_acc_status.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        self.acc_row.addWidget(self.lbl_acc_status, stretch=1)
+
+        self.btn_acc_action = QPushButton("Sign in with Google")
+        self.btn_acc_action.setFont(get_body_font(11, bold=True))
+        self.btn_acc_action.setIcon(render_icon("cloud", 14, "#FFFFFF"))
+        self.btn_acc_action.setMinimumHeight(34)
+        self.btn_acc_action.clicked.connect(self._toggle_auth)
+        self.acc_row.addWidget(self.btn_acc_action)
+        acc_layout.addLayout(self.acc_row)
+
+        self.lbl_acc_hint = QLabel("")
+        self.lbl_acc_hint.setFont(get_mono_font(10))
+        self.lbl_acc_hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        acc_layout.addWidget(self.lbl_acc_hint)
+
+        layout.addWidget(card_acc)
+
+        card_feat = QFrame()
+        card_feat.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 14px;
+            }}
+        """)
+        feat_layout = QVBoxLayout(card_feat)
+        feat_layout.setSpacing(8)
+
+        feat_title = QLabel("WORKSTATION ADVANCED FEATURES")
+        feat_title.setFont(get_mono_font(10, bold=True))
+        feat_title.setStyleSheet(f"color: {COLOR_ACCENT};")
+        feat_layout.addWidget(feat_title)
+
+        from loupe.config import config
+        self.cb_exp = QCheckBox("Enable Cloud Integration & Pre-Release Updates")
+        self.cb_exp.setFont(get_body_font(12, bold=True))
+        self.cb_exp.setChecked(bool(config.get("experimental_mode", True)))
+        self.cb_exp.toggled.connect(self._on_exp_toggled)
+        feat_layout.addWidget(self.cb_exp)
+
+        bullets = QLabel(
+            "• <b>Cloud Import & Export</b>: 4-thread parallel engine with keep-alive 2 MB sockets.<br>"
+            "• <b>Match Pictures Mode</b>: Quota limits in New Session with live over-quota warning HUD.<br>"
+            "• <b>Low-RAM JPEG Preview</b>: Lightweight browsing with linked RAWs and 'R' key inspection."
+        )
+        bullets.setFont(get_body_font(11))
+        bullets.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
+        feat_layout.addWidget(bullets)
+
+        layout.addWidget(card_feat)
+        layout.addStretch()
+
+        footer = QHBoxLayout()
+        footer.setSpacing(10)
+
+        self.btn_prefs = QPushButton("Open Full Preferences...")
+        self.btn_prefs.setFont(get_body_font(11))
+        self.btn_prefs.setStyleSheet(f"""
+            QPushButton {{
+                padding: 6px 14px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_ACCENT};
+                color: {COLOR_ACCENT};
+            }}
+        """)
+        self.btn_prefs.clicked.connect(self._open_preferences)
+        footer.addWidget(self.btn_prefs)
+
+        footer.addStretch()
+
+        self.btn_close = QPushButton("Done")
+        self.btn_close.setFont(get_body_font(12, bold=True))
+        self.btn_close.setMinimumHeight(36)
+        self.btn_close.setStyleSheet(f"""
+            QPushButton {{
+                padding: 0 24px;
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 3px;
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+            }}
+        """)
+        self.btn_close.clicked.connect(self.accept)
+        footer.addWidget(self.btn_close)
+
+        layout.addLayout(footer)
+
+    def _refresh_status(self):
+        if self.client.is_authenticated():
+            email = self.client.get_authenticated_email() or "Connected"
+            self.lbl_acc_status.setText(f"✓ Connected: {email}")
+            self.lbl_acc_status.setStyleSheet("color: #10B981; font-weight: 600;")
+            self.lbl_acc_hint.setText("Google Drive cloud imports and exports are ready.")
+            self.btn_acc_action.setText("Disconnect Account")
+            self.btn_acc_action.setStyleSheet(f"""
+                QPushButton {{
+                    padding: 0 14px;
+                    background-color: {COLOR_BG_ELEVATED};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 3px;
+                    color: {COLOR_STATUS_REJECTED};
+                }}
+                QPushButton:hover {{
+                    border-color: {COLOR_STATUS_REJECTED};
+                }}
+            """)
+        else:
+            self.lbl_acc_status.setText("Not connected")
+            self.lbl_acc_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-weight: 600;")
+            self.lbl_acc_hint.setText("Sign in to import cloud shoot folders directly into Framed.")
+            self.btn_acc_action.setText("Sign in with Google")
+            self.btn_acc_action.setStyleSheet(f"""
+                QPushButton {{
+                    padding: 0 16px;
+                    background-color: #D97706;
+                    color: #FFFFFF;
+                    border: 1px solid #F59E0B;
+                    border-radius: 3px;
+                }}
+                QPushButton:hover {{
+                    background-color: #F59E0B;
+                }}
+            """)
+
+    def _toggle_auth(self):
+        if self.client.is_authenticated():
+            self.client.disconnect()
+            self._refresh_status()
+        else:
+            from loupe.core.gdrive import GDriveAuthWorker
+            self.btn_acc_action.setEnabled(False)
+            self.lbl_acc_status.setText("Waiting for browser sign-in...")
+            self.auth_worker = GDriveAuthWorker(self)
+            self.auth_worker.auth_finished.connect(self._on_auth_finished)
+            self.auth_worker.start()
+
+    def _on_auth_finished(self, success: bool, email: str, err: str):
+        self.btn_acc_action.setEnabled(True)
+        if success:
+            QMessageBox.information(self, "Google Drive Connected", f"Successfully connected: {email}")
+        else:
+            QMessageBox.warning(self, "Sign-In Failed", f"Could not sign in to Google Drive:\n{err}")
+        self._refresh_status()
+
+    def _on_exp_toggled(self, checked: bool):
+        from loupe.config import config
+        config.set("experimental_mode", checked)
+
+    def _open_preferences(self):
+        from loupe.ui.settings_dialog import SettingsDialog
+        self.accept()
+        dlg = SettingsDialog(self.parent())
+        dlg.exec()

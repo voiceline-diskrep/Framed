@@ -184,7 +184,7 @@ class VideoSessionView(QWidget):
                 color: #FFFFFF;
             }}
         """)
-        self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+        self.gdrive_btn.setVisible(True)
         self.gdrive_btn.clicked.connect(self._import_from_gdrive)
         r_dir.addWidget(self.gdrive_btn)
         cd_layout.addLayout(r_dir)
@@ -439,7 +439,7 @@ class VideoSessionView(QWidget):
             if ans == QMessageBox.Yes:
                 s_dlg = SettingsDialog(self)
                 s_dlg.exec()
-                self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+                self.gdrive_btn.setVisible(True)
             if not GoogleDriveClient().is_authenticated():
                 return
 
@@ -500,7 +500,7 @@ class VideoSessionView(QWidget):
     def reset_form(self):
         """Reset form fields when starting fresh."""
         self._populate_folders()
-        self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+        self.gdrive_btn.setVisible(True)
         self.edit_dir.blockSignals(True)
         self.edit_dir.setText("")
         self.edit_dir.blockSignals(False)

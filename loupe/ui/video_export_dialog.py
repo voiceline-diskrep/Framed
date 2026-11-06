@@ -125,7 +125,7 @@ class VideoExportDialog(QDialog):
         mode_layout.addWidget(self.rb_dest_gdrive)
         mode_layout.addStretch()
 
-        self.mode_frame.setVisible(bool(config.get("experimental_mode", False)))
+        self.mode_frame.setVisible(True)
         layout.addWidget(self.mode_frame)
 
         # Summary of decisions card
@@ -485,17 +485,10 @@ class VideoExportDialog(QDialog):
         use_ws = self.cb_workspace.isChecked()
 
         if self.rb_dest_gdrive.isChecked():
-            from loupe.ui.settings_dialog import SettingsDialog
             if not GoogleDriveClient().is_authenticated():
-                ans = QMessageBox.question(
-                    self,
-                    "Connect Google Drive",
-                    "Please sign in to Google Drive in Preferences before uploading.\n\nOpen Preferences now?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if ans == QMessageBox.Yes:
-                    SettingsDialog(self).exec()
-                if not GoogleDriveClient().is_authenticated():
+                from loupe.ui.gdrive_dialog import GDriveSignInPromptDialog
+                prompt = GDriveSignInPromptDialog(parent=self)
+                if prompt.exec() != QDialog.Accepted or not GoogleDriveClient().is_authenticated():
                     return
 
             typed_dest = self.edit_dir.text().strip()

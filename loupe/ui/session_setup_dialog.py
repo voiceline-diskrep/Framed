@@ -265,7 +265,7 @@ class SessionSetupView(QWidget):
                 color: #FFFFFF;
             }}
         """)
-        self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+        self.gdrive_btn.setVisible(True)
         self.gdrive_btn.clicked.connect(self._import_from_gdrive)
         dir_row.addWidget(self.gdrive_btn)
         dir_layout.addLayout(dir_row)
@@ -652,7 +652,7 @@ class SessionSetupView(QWidget):
             if ans == QMessageBox.Yes:
                 s_dlg = SettingsDialog(self)
                 s_dlg.exec()
-                self.gdrive_btn.setVisible(bool(config.get("experimental_mode", False)))
+                self.gdrive_btn.setVisible(True)
             if not GoogleDriveClient().is_authenticated():
                 return
 
@@ -801,7 +801,7 @@ class SessionSetupView(QWidget):
         """Reset form fields when opening a new session."""
         self._populate_folders()
         exp_on = bool(config.get("experimental_mode", False))
-        self.gdrive_btn.setVisible(exp_on)
+        self.gdrive_btn.setVisible(True)
         if hasattr(self, "sec_preview_engine"):
             self.sec_preview_engine.setVisible(self.rb_both.isChecked())
         if hasattr(self, "sec_match_mode"):

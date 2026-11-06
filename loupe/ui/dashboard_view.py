@@ -1113,6 +1113,13 @@ class DashboardView(QWidget):
         self.new_session_btn.clicked.connect(self.new_session_requested.emit)
         header_layout.addWidget(self.new_session_btn)
 
+        self.gdrive_btn = QPushButton("Google Drive")
+        self.gdrive_btn.setIcon(render_icon("cloud", 14, COLOR_ACCENT))
+        self.gdrive_btn.setMinimumHeight(36)
+        self.gdrive_btn.setToolTip("Google Drive Cloud Integration & Account Status")
+        self.gdrive_btn.clicked.connect(self._open_gdrive_manager)
+        header_layout.addWidget(self.gdrive_btn)
+
         self.theme_btn = QPushButton("Theme")
         self.theme_btn.setIcon(render_icon("palette", 14, COLOR_ACCENT))
         self.theme_btn.setMinimumHeight(36)
@@ -1345,6 +1352,53 @@ class DashboardView(QWidget):
         else:
             self.btn_mode_photo.setStyleSheet(inactive_style)
             self.btn_mode_video.setStyleSheet(active_style)
+
+    def _open_gdrive_manager(self):
+        from loupe.ui.gdrive_dialog import GDriveManagerDialog
+        dlg = GDriveManagerDialog(self)
+        dlg.exec()
+        self.refresh_cloud_status()
+
+    def refresh_cloud_status(self):
+        if not hasattr(self, "gdrive_btn"):
+            return
+        try:
+            from loupe.core.gdrive import GoogleDriveClient
+            client = GoogleDriveClient()
+            if client.is_authenticated():
+                email = client.get_authenticated_email() or "Connected"
+                short = email.split("@")[0] if "@" in email else email
+                self.gdrive_btn.setText(f"Drive ({short})")
+                self.gdrive_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        padding: 0 14px;
+                        background-color: #162B1D;
+                        border: 1px solid #10B981;
+                        border-radius: 3px;
+                        color: #6EE7B7;
+                        font-weight: 600;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #1E3D29;
+                    }}
+                """)
+            else:
+                self.gdrive_btn.setText("Google Drive")
+                self.gdrive_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        padding: 0 14px;
+                        background-color: {COLOR_BG_ELEVATED};
+                        border: 1px solid {COLOR_BORDER_DISTINCT};
+                        border-radius: 3px;
+                        color: {COLOR_TEXT_PRIMARY};
+                    }}
+                    QPushButton:hover {{
+                        border-color: {COLOR_ACCENT};
+                        color: {COLOR_ACCENT};
+                    }}
+                """)
+        except Exception:
+            pass
 
     def refresh(self):
         """Reload folders and projects from storage."""

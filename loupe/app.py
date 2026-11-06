@@ -175,6 +175,8 @@ class FramedMainWindow(QMainWindow):
             self.photo_setup_view._update_format_visibility()
         if hasattr(self.video_setup_view, "gdrive_btn"):
             self.video_setup_view.gdrive_btn.setVisible(exp_on)
+        if hasattr(self.dashboard_view, "refresh_cloud_status"):
+            self.dashboard_view.refresh_cloud_status()
 
     def _restart_tour(self):
         tour = TourDialog(self)
