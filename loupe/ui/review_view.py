@@ -7,10 +7,11 @@ from PySide6.QtWidgets import (
     QFrame, QMessageBox, QDialog, QGraphicsView, QGraphicsScene,
     QGraphicsPixmapItem, QGraphicsRectItem, QProgressBar
 )
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QPropertyAnimation, QVariantAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import (
     QImage, QPixmap, QWheelEvent, QKeyEvent, QPainter, QBrush, QColor, QFont
 )
+from PySide6.QtWidgets import QGraphicsOpacityEffect
 from loupe.config import config
 from loupe.models import Project, PhotoItem
 from loupe.storage import storage
@@ -27,6 +28,97 @@ from loupe.ui.theme import (
     COLOR_STATUS_MAYBE, get_display_font, get_body_font, get_mono_font
 )
 from loupe.ui.icons import render_icon
+
+class QuotaToastBanner(QFrame):
+    """Floating HUD toast banner notifying photographer when match photo quota is reached."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("quotaToastBanner")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setStyleSheet("""
+            QFrame#quotaToastBanner {
+                background-color: rgba(6, 78, 59, 0.94);
+                border: 1px solid #10B981;
+                border-radius: 20px;
+                padding: 6px 18px;
+            }
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 6, 14, 6)
+        layout.setSpacing(10)
+
+        self.icon_lbl = QLabel("🎯")
+        self.icon_lbl.setFont(get_display_font(13))
+        layout.addWidget(self.icon_lbl)
+
+        self.text_lbl = QLabel("Target Quota Reached!")
+        self.text_lbl.setFont(get_display_font(12, bold=True))
+        self.text_lbl.setStyleSheet("color: #FFFFFF;")
+        layout.addWidget(self.text_lbl)
+
+        self.count_lbl = QLabel("15 / 15 Photos")
+        self.count_lbl.setFont(get_mono_font(12, bold=True))
+        self.count_lbl.setStyleSheet("color: #6EE7B7;")
+        layout.addWidget(self.count_lbl)
+
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.opacity_effect.setOpacity(0.0)
+        self.hide()
+
+        self.slide_anim = None
+        self.fade_anim = None
+        self.hide_timer = QTimer(self)
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self._fade_out)
+
+    def show_toast(self, selected: int, total: int):
+        self.text_lbl.setText("Target Quota Reached!")
+        self.count_lbl.setText(f"{selected} / {total} Photos")
+        self.adjustSize()
+
+        if self.parent():
+            parent_w = self.parent().width()
+            target_x = max(20, (parent_w - self.width()) // 2)
+        else:
+            target_x = 100
+
+        start_y = -self.height()
+        target_y = 54  # Float gracefully just beneath top navigation bar
+
+        self.move(target_x, start_y)
+        self.show()
+        self.raise_()
+
+        # Slide down animation
+        self.slide_anim = QPropertyAnimation(self, b"pos")
+        self.slide_anim.setDuration(350)
+        self.slide_anim.setStartValue(QPoint(target_x, start_y))
+        self.slide_anim.setEndValue(QPoint(target_x, target_y))
+        self.slide_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.slide_anim.start()
+
+        # Fade in animation
+        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.fade_anim.setDuration(250)
+        self.fade_anim.setStartValue(0.0)
+        self.fade_anim.setEndValue(1.0)
+        self.fade_anim.start()
+
+        # Auto-dismiss after 2.5s
+        self.hide_timer.stop()
+        self.hide_timer.start(2500)
+
+    def _fade_out(self):
+        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.fade_anim.setDuration(400)
+        self.fade_anim.setStartValue(self.opacity_effect.opacity())
+        self.fade_anim.setEndValue(0.0)
+        self.fade_anim.setEasingCurve(QEasingCurve.InQuad)
+        self.fade_anim.finished.connect(self.hide)
+        self.fade_anim.start()
+
 
 class PhotoCanvas(QGraphicsView):
     """High-performance graphics view with smooth wheel zoom, panning, fit-to-window, and 100% actual pixels."""
@@ -157,7 +249,10 @@ class ReviewView(QWidget):
 
         top_layout.addStretch()
 
-        # Match Mode Quota Badge
+        # Match Mode Quota Badge & Toast
+        self.quota_toast = QuotaToastBanner(self)
+        self._prev_quota_selected = None
+        self._badge_anim = None
         self.quota_badge = QLabel("")
         self.quota_badge.setFont(get_mono_font(11, bold=True))
         self.quota_badge.setVisible(False)
@@ -314,6 +409,9 @@ class ReviewView(QWidget):
         super().resizeEvent(event)
         if hasattr(self, "preload_overlay") and self.preload_overlay:
             self.preload_overlay.setGeometry(self.rect())
+        if hasattr(self, "quota_toast") and self.quota_toast and self.quota_toast.isVisible():
+            target_x = max(20, (self.width() - self.quota_toast.width()) // 2)
+            self.quota_toast.move(target_x, self.quota_toast.y())
 
     def refresh_key_bindings(self):
         keep_key = config.get_key_binding("keep").upper()
@@ -359,6 +457,9 @@ class ReviewView(QWidget):
         self.unload_project()
 
         self.project = project
+        self._prev_quota_selected = project.selected_count if project else 0
+        if hasattr(self, "quota_toast"):
+            self.quota_toast.hide()
         self.project_title_lbl.setText(project.name)
         self.undo_stack.clear()
         self.refresh_key_bindings()
@@ -461,7 +562,9 @@ class ReviewView(QWidget):
             max_limit = self.project.max_selected_count
             current_sel = self.project.selected_count
             self.quota_badge.setVisible(True)
+
             if current_sel > max_limit:
+                # 3. Over Quota State: Bright Red Warning Capsule
                 over = current_sel - max_limit
                 self.quota_badge.setText(f"OVER QUOTA: {current_sel} / {max_limit} (+{over})")
                 self.quota_badge.setStyleSheet(f"""
@@ -472,25 +575,33 @@ class ReviewView(QWidget):
                     border-radius: 3px;
                 """)
             elif current_sel == max_limit:
+                # 2. Quota Reached State: Vivid Emerald Green + Animation & Floating HUD Toast
                 self.quota_badge.setText(f"QUOTA REACHED: {current_sel} / {max_limit}")
                 self.quota_badge.setStyleSheet(f"""
-                    background-color: #382A10;
-                    color: #FBBF24;
-                    border: 1px solid {COLOR_STATUS_MAYBE};
+                    background-color: #064E3B;
+                    color: #34D399;
+                    border: 1px solid #059669;
                     padding: 4px 10px;
                     border-radius: 3px;
                 """)
+                # Trigger pulse animation & HUD toast if newly reached
+                if self._prev_quota_selected is not None and self._prev_quota_selected < max_limit:
+                    self._animate_quota_reached(current_sel, max_limit)
             else:
+                # 1. Under Quota State (Still in progress): Warm Amber / Yellow
                 self.quota_badge.setText(f"QUOTA: {current_sel} / {max_limit}")
                 self.quota_badge.setStyleSheet(f"""
-                    background-color: #162B1D;
-                    color: #6EE7B7;
-                    border: 1px solid {COLOR_STATUS_KEPT};
+                    background-color: #2E2208;
+                    color: #FBBF24;
+                    border: 1px solid #D97706;
                     padding: 4px 10px;
                     border-radius: 3px;
                 """)
+
+            self._prev_quota_selected = current_sel
         else:
             self.quota_badge.setVisible(False)
+            self._prev_quota_selected = None
 
         # Update Inspect RAW button visibility
         has_linked_raw = bool(item.raw_path and os.path.exists(item.raw_path) and item.primary_path != item.raw_path)
@@ -709,6 +820,41 @@ class ReviewView(QWidget):
         if confirm == QMessageBox.Yes:
             self.unload_project()
             self.back_to_dashboard.emit()
+
+    def _animate_quota_reached(self, current_sel: int, max_limit: int):
+        """Play pulse/glow pop animation on quota badge and show floating HUD toast."""
+        if hasattr(self, "quota_toast"):
+            self.quota_toast.show_toast(current_sel, max_limit)
+
+        import math
+        self._badge_anim = QVariantAnimation(self)
+        self._badge_anim.setDuration(500)
+        self._badge_anim.setStartValue(0.0)
+        self._badge_anim.setEndValue(1.0)
+
+        def _on_anim_step(val):
+            pulse = math.sin(val * math.pi)
+            pad_v = int(4 + pulse * 3)
+            pad_h = int(10 + pulse * 6)
+            glow_col = "#6EE7B7" if pulse > 0.5 else "#059669"
+            bg_col = "#065F46" if pulse > 0.3 else "#064E3B"
+            self.quota_badge.setStyleSheet(f"""
+                background-color: {bg_col};
+                color: #FFFFFF;
+                border: 2px solid {glow_col};
+                padding: {pad_v}px {pad_h}px;
+                border-radius: 4px;
+            """)
+
+        self._badge_anim.valueChanged.connect(_on_anim_step)
+        self._badge_anim.finished.connect(lambda: self.quota_badge.setStyleSheet(f"""
+            background-color: #064E3B;
+            color: #34D399;
+            border: 1px solid #059669;
+            padding: 4px 10px;
+            border-radius: 3px;
+        """))
+        self._badge_anim.start()
 
     def _toggle_inspect_raw(self):
         if not self.project or not self.project.items:

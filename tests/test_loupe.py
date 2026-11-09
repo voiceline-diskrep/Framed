@@ -1094,22 +1094,33 @@ class TestLoupeWorkstation(unittest.TestCase):
         review = ReviewView()
         review.load_project(proj)
 
-        # Verify initial quota display
+        # Verify initial quota display (Under Quota -> Yellow #FBBF24)
         self.assertFalse(review.quota_badge.isHidden())
         self.assertIn("QUOTA: 0 / 2", review.quota_badge.text())
+        self.assertIn("#FBBF24", review.quota_badge.styleSheet())
         self.assertFalse(review.inspect_raw_btn.isHidden())
 
-        # Select first photo
+        # Select first photo (1/2 -> Still Under Quota -> Yellow #FBBF24)
         review.keep_current()
         self.assertIn("QUOTA: 1 / 2", review.quota_badge.text())
+        self.assertIn("#FBBF24", review.quota_badge.styleSheet())
+        self.assertIn("#FBBF24", review.stats_panel.quota_val_lbl.styleSheet())
 
-        # Select second photo (reaches quota)
+        # Select second photo (2/2 -> Quota Reached -> Emerald Green #34D399 + Toast Banner & Pulse)
         review.keep_current()
         self.assertIn("QUOTA REACHED: 2 / 2", review.quota_badge.text())
+        self.assertIn("#34D399", review.quota_badge.styleSheet())
+        self.assertIn("#34D399", review.stats_panel.quota_val_lbl.styleSheet())
+        self.assertIsNotNone(review.quota_toast)
+        self.assertFalse(review.quota_toast.isHidden())
+        self.assertIn("Target Quota Reached!", review.quota_toast.text_lbl.text())
+        self.assertIn("2 / 2 Photos", review.quota_toast.count_lbl.text())
 
-        # Select third photo (over quota soft cap)
+        # Select third photo (3/2 -> Over Quota -> Bright Red #F87171)
         review.keep_current()
         self.assertIn("OVER QUOTA: 3 / 2 (+1)", review.quota_badge.text())
+        self.assertIn("#F87171", review.quota_badge.styleSheet())
+        self.assertIn("#F87171", review.stats_panel.quota_val_lbl.styleSheet())
         self.assertTrue(proj.is_over_quota)
 
         # Navigate back to item 0 which has linked raw

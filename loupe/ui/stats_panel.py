@@ -273,14 +273,14 @@ class StatsPanel(QFrame):
             self.quota_status_lbl.setStyleSheet("color: #F87171; font-weight: bold;")
             self.quota_val_lbl.setStyleSheet("color: #F87171; font-weight: bold;")
         elif selected_count == max_limit:
-            self.quota_status_lbl.setText("Target quota reached (100%)")
-            self.quota_status_lbl.setStyleSheet(f"color: {COLOR_ACCENT}; font-weight: bold;")
-            self.quota_val_lbl.setStyleSheet(f"color: {COLOR_ACCENT}; font-weight: bold;")
+            self.quota_status_lbl.setText("✓ Target quota reached (100%)")
+            self.quota_status_lbl.setStyleSheet("color: #34D399; font-weight: bold;")
+            self.quota_val_lbl.setStyleSheet("color: #34D399; font-weight: bold;")
         else:
             rem = max_limit - selected_count
             self.quota_status_lbl.setText(f"{rem} remaining to target")
-            self.quota_status_lbl.setStyleSheet("color: #6EE7B7;")
-            self.quota_val_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+            self.quota_status_lbl.setStyleSheet("color: #FBBF24; font-weight: bold;")
+            self.quota_val_lbl.setStyleSheet("color: #FBBF24; font-weight: bold;")
 
     def reset_telemetry(self):
         """Reset all optical telemetry readouts to clean blank state."""
