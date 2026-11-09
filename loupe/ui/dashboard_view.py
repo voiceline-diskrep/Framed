@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QScrollArea, QFrame, QInputDialog,
     QMessageBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
     QLineEdit, QComboBox, QMenu, QTreeWidget, QTreeWidgetItem,
-    QHeaderView, QGraphicsDropShadowEffect, QStyledItemDelegate,
+    QHeaderView, QGraphicsDropShadowEffect, QStyledItemDelegate, QCheckBox,
     QStyle, QGridLayout, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, QDate, QSize, QPoint, QRectF, QPointF
+from PySide6.QtCore import Qt, Signal, QDate, QSize, QPoint, QRectF, QPointF, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QLinearGradient, QPainterPath, QPen, QBrush,
     QPixmap, QImage, QImageReader, QFont
@@ -34,6 +34,7 @@ from loupe.ui.theme import (
     THEMES, current_theme_id, apply_theme, theme_manager, is_current_theme_light
 )
 from loupe.ui.icons import render_icon
+from loupe.ui.batch_export_dialog import BatchExportDialog
 
 
 # In-memory thumbnail cover cache for snappy scrolling
@@ -960,9 +961,13 @@ class DashboardModalOverlay(QWidget):
         b_row.addStretch()
 
         btn_confirm = QPushButton(confirm_text)
+        self.btn_confirm = btn_confirm
         btn_confirm.setFont(get_body_font(12, bold=True))
         btn_confirm.setMinimumHeight(36)
+        
         if is_destructive:
+            btn_confirm.setEnabled(False)
+            btn_confirm.setText(f"{confirm_text} (5s)")
             btn_confirm.setStyleSheet("""
                 QPushButton {
                     background-color: #EF4444;
@@ -975,7 +980,25 @@ class DashboardModalOverlay(QWidget):
                 QPushButton:hover {
                     background-color: #DC2626;
                 }
+                QPushButton:disabled {
+                    background-color: #2E1B1E;
+                    color: #7F5559;
+                    border: 1px solid #4D262B;
+                }
             """)
+            countdown = 5
+            self._del_timer = QTimer(self)
+            def _tick():
+                nonlocal countdown
+                countdown -= 1
+                if countdown > 0:
+                    btn_confirm.setText(f"{confirm_text} ({countdown}s)")
+                else:
+                    self._del_timer.stop()
+                    btn_confirm.setEnabled(True)
+                    btn_confirm.setText(confirm_text)
+            self._del_timer.timeout.connect(_tick)
+            self._del_timer.start(1000)
         else:
             btn_confirm.setStyleSheet(f"""
                 QPushButton {{
@@ -988,7 +1011,19 @@ class DashboardModalOverlay(QWidget):
                 }}
             """)
 
+        def _cancel_overlay():
+            if hasattr(self, "_del_timer") and self._del_timer.isActive():
+                self._del_timer.stop()
+            self.hide()
+
+        btn_cancel.clicked.disconnect()
+        btn_cancel.clicked.connect(_cancel_overlay)
+        btn_x.clicked.disconnect()
+        btn_x.clicked.connect(_cancel_overlay)
+
         def _submit():
+            if hasattr(self, "_del_timer") and self._del_timer.isActive():
+                self._del_timer.stop()
             self.hide()
             on_confirmed()
 
@@ -1013,11 +1048,13 @@ class ProjectCard(QFrame):
     edit_requested = Signal(object) # Project
     edit_folder_requested = Signal(object) # Project
     edit_date_requested = Signal(object) # Project
+    selection_toggled = Signal(str, bool) # project_id, is_selected
 
     def __init__(self, project: Project, view_mode: str = "list", parent=None):
         super().__init__(parent)
         self.project = project
         self.view_mode = view_mode
+        self.is_selected: bool = False
         self.setObjectName("projectCardFrame")
 
         if view_mode == "compact":
@@ -1048,6 +1085,24 @@ class ProjectCard(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 4)
         layout.setSpacing(10)
+
+        self.select_cb = QCheckBox()
+        self.select_cb.setCursor(Qt.PointingHandCursor)
+        self.select_cb.setStyleSheet(f"""
+            QCheckBox::indicator {{
+                width: 15px;
+                height: 15px;
+                border-radius: 3px;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                background: {COLOR_BG_ELEVATED};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLOR_ACCENT};
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        self.select_cb.toggled.connect(self._on_select_toggled)
+        layout.addWidget(self.select_cb)
 
         # Mini thumbnail
         thumb = QLabel()
@@ -1198,6 +1253,27 @@ class ProjectCard(QFrame):
         # Title & Type Row
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
+        self.select_cb = QCheckBox()
+        self.select_cb.setCursor(Qt.PointingHandCursor)
+        self.select_cb.setToolTip("Select session for bulk actions")
+        self.select_cb.setStyleSheet(f"""
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                background: {COLOR_BG_ELEVATED};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {COLOR_ACCENT};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLOR_ACCENT};
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        self.select_cb.toggled.connect(self._on_select_toggled)
+        title_row.addWidget(self.select_cb)
         name_lbl = QLabel(self.project.name)
         name_lbl.setFont(get_display_font(14, bold=True))
         name_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
@@ -1313,6 +1389,41 @@ class ProjectCard(QFrame):
         act_row.addWidget(del_btn)
         card_layout.addLayout(act_row)
 
+    def _on_select_toggled(self, checked: bool):
+        self.is_selected = checked
+        self._update_card_selection_style()
+        self.selection_toggled.emit(self.project.id, checked)
+
+    def set_selected(self, selected: bool):
+        self.is_selected = selected
+        if hasattr(self, "select_cb"):
+            self.select_cb.blockSignals(True)
+            self.select_cb.setChecked(selected)
+            self.select_cb.blockSignals(False)
+        self._update_card_selection_style()
+
+    def _update_card_selection_style(self):
+        if self.is_selected:
+            self.setStyleSheet(f"""
+                QFrame#projectCardFrame {{
+                    background-color: {COLOR_BG_ACTIVE};
+                    border: 1.5px solid {COLOR_ACCENT};
+                    border-radius: {'6px' if self.view_mode == 'compact' else '10px'};
+                }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QFrame#projectCardFrame {{
+                    background-color: {COLOR_BG_SURFACE};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: {'6px' if self.view_mode == 'compact' else '10px'};
+                }}
+                QFrame#projectCardFrame:hover {{
+                    border-color: {COLOR_ACCENT};
+                    background-color: {COLOR_BG_ELEVATED};
+                }}
+            """)
+
     def _init_list_ui(self):
         project = self.project
         self.setStyleSheet(f"""
@@ -1336,7 +1447,30 @@ class ProjectCard(QFrame):
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(14, 12, 16, 12)
-        main_layout.setSpacing(16)
+        main_layout.setSpacing(14)
+
+        # Checkbox for multi-select
+        self.select_cb = QCheckBox()
+        self.select_cb.setCursor(Qt.PointingHandCursor)
+        self.select_cb.setToolTip("Select session for bulk actions")
+        self.select_cb.setStyleSheet(f"""
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                background: {COLOR_BG_ELEVATED};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {COLOR_ACCENT};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLOR_ACCENT};
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        self.select_cb.toggled.connect(self._on_select_toggled)
+        main_layout.addWidget(self.select_cb)
 
         # 1. Left: Cover Thumbnail (120x80)
         self.thumb_lbl = QLabel()
@@ -1713,6 +1847,8 @@ class DashboardView(QWidget):
     fullscreen_requested = Signal()
     media_mode_changed = Signal(str)      # "photo" or "video"
     gallery_requested = Signal()
+    resume_culling_queue_requested = Signal(list)  # List[str] project_ids
+    batch_export_requested = Signal(list)          # List[Project] projects
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1721,7 +1857,10 @@ class DashboardView(QWidget):
         self.search_query: str = ""
         self.active_status_filter: str = "All"  # All, Photos, Videos, Completed, In Progress
         self.current_view_mode: str = "list"  # "list", "grid", or "compact"
+        self.selected_project_ids = set()
+        self._current_rendered_cards = {}
         self._init_ui()
+        self._setup_bulk_bar()
         self.modal_overlay = DashboardModalOverlay(self)
         self.refresh()
         theme_manager.theme_changed.connect(self._on_theme_changed)
@@ -1730,6 +1869,8 @@ class DashboardView(QWidget):
         super().resizeEvent(event)
         if hasattr(self, "modal_overlay") and self.modal_overlay:
             self.modal_overlay.setGeometry(self.rect())
+        if hasattr(self, "bulk_bar"):
+            self._position_bulk_bar()
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
@@ -2083,6 +2224,26 @@ class DashboardView(QWidget):
         """)
         self.search_edit.textChanged.connect(self._on_search_text_changed)
         toolbar_row.addWidget(self.search_edit)
+
+        self.btn_select_toggle = QPushButton("Select All")
+        self.btn_select_toggle.setIcon(render_icon("check", 11, COLOR_TEXT_SECONDARY))
+        self.btn_select_toggle.setFont(get_body_font(11))
+        self.btn_select_toggle.setMinimumHeight(34)
+        self.btn_select_toggle.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_TEXT_SECONDARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 8px;
+                padding: 0 12px;
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        self.btn_select_toggle.clicked.connect(self._toggle_select_all)
+        toolbar_row.addWidget(self.btn_select_toggle)
 
         toolbar_row.addStretch()
 
@@ -2564,6 +2725,7 @@ class DashboardView(QWidget):
         menu.exec(self.folder_tree.mapToGlobal(pos))
 
     def _load_projects_for_selection(self):
+        self._current_rendered_cards.clear()
         while self.projects_layout.count():
             child = self.projects_layout.takeAt(0)
             if child.widget():
@@ -2694,6 +2856,10 @@ class DashboardView(QWidget):
                     self.projects_layout.addWidget(card)
 
     def _connect_card_signals(self, card: ProjectCard):
+        card.selection_toggled.connect(self._on_card_selection_toggled)
+        if card.project.id in self.selected_project_ids:
+            card.set_selected(True)
+        self._current_rendered_cards[card.project.id] = card
         card.resume_clicked.connect(self.open_project_requested.emit)
         card.export_clicked.connect(self.export_project_requested.emit)
         card.delete_clicked.connect(self._on_delete_project)
@@ -2806,6 +2972,266 @@ class DashboardView(QWidget):
             f"Delete session '{proj.name}'?\nOriginal media on disk will never be touched.",
             _confirmed,
             confirm_text="Delete Session",
+            is_destructive=True
+        )
+
+    def _setup_bulk_bar(self):
+        self.bulk_bar = QFrame(self.right_area)
+        self.bulk_bar.setObjectName("floatingBulkBar")
+        self.bulk_bar.setFixedHeight(50)
+        self.bulk_bar.setStyleSheet(f"""
+            QFrame#floatingBulkBar {{
+                background-color: #171A21;
+                border: 1.5px solid {COLOR_ACCENT};
+                border-radius: 25px;
+            }}
+        """)
+        bb_layout = QHBoxLayout(self.bulk_bar)
+        bb_layout.setContentsMargins(16, 6, 16, 6)
+        bb_layout.setSpacing(12)
+
+        self.bulk_count_lbl = QLabel("0 Selected")
+        self.bulk_count_lbl.setFont(get_body_font(12, bold=True))
+        self.bulk_count_lbl.setStyleSheet(f"color: {COLOR_ACCENT};")
+        bb_layout.addWidget(self.bulk_count_lbl)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.VLine)
+        sep1.setFixedWidth(1)
+        sep1.setFixedHeight(20)
+        sep1.setStyleSheet(f"background-color: {COLOR_BORDER_DISTINCT};")
+        bb_layout.addWidget(sep1)
+
+        self.btn_bulk_resume = QPushButton(" ▶  Resume Culling All")
+        self.btn_bulk_resume.setFont(get_body_font(11, bold=True))
+        self.btn_bulk_resume.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_resume.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 14px;
+                padding: 5px 14px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_ACCENT};
+                color: {COLOR_ACCENT};
+            }}
+        """)
+        self.btn_bulk_resume.clicked.connect(self._on_bulk_resume_all)
+        bb_layout.addWidget(self.btn_bulk_resume)
+
+        self.btn_bulk_export = QPushButton(" 📤  Export All in Order")
+        self.btn_bulk_export.setFont(get_body_font(11, bold=True))
+        self.btn_bulk_export.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_export.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLOR_ACCENT}, stop:1 {COLOR_ACCENT_PRESSED});
+                color: #FFFFFF;
+                border: 1px solid {COLOR_ACCENT_HOVER};
+                border-radius: 14px;
+                padding: 5px 16px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background: {COLOR_ACCENT_HOVER};
+            }}
+        """)
+        self.btn_bulk_export.clicked.connect(self._on_bulk_export_all)
+        bb_layout.addWidget(self.btn_bulk_export)
+
+        self.btn_bulk_move = QPushButton(" 📁  Move to Folder")
+        self.btn_bulk_move.setFont(get_body_font(11))
+        self.btn_bulk_move.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_move.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 14px;
+                padding: 5px 14px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_ACCENT};
+            }}
+        """)
+        self.btn_bulk_move.clicked.connect(self._on_bulk_move)
+        bb_layout.addWidget(self.btn_bulk_move)
+
+        self.btn_bulk_del = QPushButton(" 🗑  Delete All")
+        self.btn_bulk_del.setFont(get_body_font(11, bold=True))
+        self.btn_bulk_del.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_del.setStyleSheet("""
+            QPushButton {
+                background-color: #331A1D;
+                color: #F87171;
+                border: 1px solid #7F1D1D;
+                border-radius: 14px;
+                padding: 5px 14px;
+            }
+            QPushButton:hover {
+                background-color: #4A2227;
+                border-color: #EF4444;
+            }
+        """)
+        self.btn_bulk_del.clicked.connect(self._on_bulk_delete_all)
+        bb_layout.addWidget(self.btn_bulk_del)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.VLine)
+        sep2.setFixedWidth(1)
+        sep2.setFixedHeight(20)
+        sep2.setStyleSheet(f"background-color: {COLOR_BORDER_DISTINCT};")
+        bb_layout.addWidget(sep2)
+
+        self.btn_bulk_deselect = QPushButton("✕ Deselect")
+        self.btn_bulk_deselect.setFont(get_body_font(11))
+        self.btn_bulk_deselect.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_deselect.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLOR_TEXT_MUTED};
+                border: none;
+                padding: 5px 10px;
+            }}
+            QPushButton:hover {{
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+        """)
+        self.btn_bulk_deselect.clicked.connect(self._deselect_all)
+        bb_layout.addWidget(self.btn_bulk_deselect)
+
+        self.bulk_bar.setVisible(False)
+
+    def _position_bulk_bar(self):
+        if hasattr(self, "bulk_bar") and hasattr(self, "right_area"):
+            rw = self.right_area.width()
+            rh = self.right_area.height()
+            bar_w = min(720, max(500, rw - 60))
+            self.bulk_bar.setFixedWidth(bar_w)
+            bx = (rw - bar_w) // 2
+            by = rh - 66
+            self.bulk_bar.move(bx, by)
+
+    def _update_bulk_bar(self):
+        cnt = len(self.selected_project_ids)
+        if cnt > 0:
+            self.bulk_count_lbl.setText(f"✓  {cnt} Selected")
+            self._position_bulk_bar()
+            self.bulk_bar.setVisible(True)
+            self.bulk_bar.raise_()
+            if hasattr(self, "btn_select_toggle"):
+                self.btn_select_toggle.setText("Deselect All")
+        else:
+            self.bulk_bar.setVisible(False)
+            if hasattr(self, "btn_select_toggle"):
+                self.btn_select_toggle.setText("Select All")
+
+    def _on_card_selection_toggled(self, project_id: str, is_selected: bool):
+        if is_selected:
+            self.selected_project_ids.add(project_id)
+        else:
+            self.selected_project_ids.discard(project_id)
+        self._update_bulk_bar()
+
+    def _get_current_filtered_projects(self) -> list:
+        mode = self.current_media_mode
+        if self.selected_folder_id:
+            base = storage.get_projects(self.selected_folder_id, media_type=mode)
+        else:
+            base = storage.get_projects(media_type=mode)
+        if self.search_query:
+            base = [p for p in base if self.search_query in p.name.lower() or self.search_query in p.shoot_date.lower()]
+        if self.active_status_filter == "Photos":
+            base = [p for p in base if getattr(p, "media_type", "photo") != "video"]
+        elif self.active_status_filter == "Videos":
+            base = [p for p in base if getattr(p, "media_type", "photo") == "video"]
+        elif self.active_status_filter == "Completed":
+            base = [p for p in base if "Completed" in getattr(p, "status_label", "")]
+        elif self.active_status_filter == "In Progress":
+            base = [p for p in base if "Progress" in getattr(p, "status_label", "")]
+        return base
+
+    def _toggle_select_all(self):
+        curr_projs = self._get_current_filtered_projects()
+        all_ids = {p.id for p in curr_projs}
+        if self.selected_project_ids >= all_ids and len(all_ids) > 0:
+            self._deselect_all()
+        else:
+            self.selected_project_ids |= all_ids
+            for pid, card in self._current_rendered_cards.items():
+                card.set_selected(pid in self.selected_project_ids)
+            self._update_bulk_bar()
+
+    def _deselect_all(self):
+        self.selected_project_ids.clear()
+        for card in self._current_rendered_cards.values():
+            card.set_selected(False)
+        self._update_bulk_bar()
+
+    def _on_bulk_resume_all(self):
+        ordered_pids = [p.id for p in self._get_current_filtered_projects() if p.id in self.selected_project_ids]
+        if not ordered_pids:
+            return
+        self.resume_culling_queue_requested.emit(ordered_pids)
+
+    def _on_bulk_export_all(self):
+        ordered_projs = [p for p in self._get_current_filtered_projects() if p.id in self.selected_project_ids]
+        if not ordered_projs:
+            return
+        dlg = BatchExportDialog(ordered_projs, self)
+        dlg.exec()
+
+    def _on_bulk_move(self):
+        if not self.selected_project_ids:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                padding: 6px;
+                border-radius: 8px;
+            }}
+            QMenu::item {{
+                padding: 6px 20px;
+                color: {COLOR_TEXT_PRIMARY};
+                font-size: 12px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_ACCENT};
+            }}
+        """)
+        act_root = menu.addAction("📁 Top-Level Workspace (No Folder)")
+        act_root.triggered.connect(lambda: self._execute_bulk_move(None))
+        menu.addSeparator()
+        for f in storage.get_folders():
+            act = menu.addAction(f"📁 {f.name}")
+            act.triggered.connect(lambda checked=False, fid=f.id: self._execute_bulk_move(fid))
+        menu.exec(QCursor.pos())
+
+    def _execute_bulk_move(self, target_folder_id: Optional[str]):
+        for pid in list(self.selected_project_ids):
+            storage.update_project_folder(pid, target_folder_id)
+        self._deselect_all()
+        self.refresh()
+
+    def _on_bulk_delete_all(self):
+        cnt = len(self.selected_project_ids)
+        if cnt == 0:
+            return
+        def _confirmed():
+            for pid in list(self.selected_project_ids):
+                storage.delete_project(pid)
+            self._deselect_all()
+            self.refresh()
+
+        self.modal_overlay.show_confirm_delete(
+            title=f"Delete {cnt} Sessions",
+            message=f"Are you sure you want to delete {cnt} selected session(s)?\n\nOriginal photos and video files on disk will NEVER be touched.",
+            on_confirmed=_confirmed,
+            confirm_text=f"Delete {cnt} Sessions",
             is_destructive=True
         )
 

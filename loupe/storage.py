@@ -24,8 +24,8 @@ def format_bytes(size_bytes: int) -> str:
 
 
 class StorageManager:
-    def __init__(self):
-        self.db_path = os.path.join(get_app_dir(), "database.json")
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path if db_path else os.path.join(get_app_dir(), "database.json")
         self.folders: Dict[str, Folder] = {}
         self.projects: Dict[str, Project] = {}
         # Gallery collections
@@ -95,25 +95,19 @@ class StorageManager:
         self._seed_defaults()
 
     def _seed_defaults(self) -> None:
-        school = Folder(id="folder_school", name="School")
         personal = Folder(id="folder_personal", name="Personal")
-        commercial = Folder(id="folder_commercial", name="Commercial")
-        for f in (school, personal, commercial):
+        work = Folder(id="folder_work", name="Work")
+        for f in (personal, work):
             self.folders[f.id] = f
         self._seed_gallery_defaults(save_after=False)
         self.save()
 
     def _seed_gallery_defaults(self, save_after: bool = True) -> None:
         if not self.gallery_folders:
-            f_school = GalleryFolder(id="gf_school", name="School Pictures")
-            f_school_2025 = GalleryFolder(id="gf_school_2025", name="2025", parent_id="gf_school")
-            f_school_2026 = GalleryFolder(id="gf_school_2026", name="2026", parent_id="gf_school")
-            f_gramp = GalleryFolder(id="gf_gramp", name="Gramp's Birthday")
-            f_vacations = GalleryFolder(id="gf_vacations", name="Vacations")
-            f_family = GalleryFolder(id="gf_family", name="Family")
             f_personal = GalleryFolder(id="gf_personal", name="Personal")
-            f_projects = GalleryFolder(id="gf_projects", name="Projects")
-            for gf in (f_school, f_school_2025, f_school_2026, f_gramp, f_vacations, f_family, f_personal, f_projects):
+            f_school = GalleryFolder(id="gf_school", name="School")
+            f_work = GalleryFolder(id="gf_work", name="Work")
+            for gf in (f_personal, f_school, f_work):
                 self.gallery_folders[gf.id] = gf
 
         if not self.smart_albums:
@@ -483,7 +477,7 @@ class StorageManager:
         elif section == "other":
             items = [p for p in items if p.format_type == "OTHER"]
         elif section == "missing":
-            items = [p for p in items if p.is_missing]
+            items = [p for p in items if p.is_missing or not (p.active_path and os.path.exists(p.active_path))]
         elif section == "recent":
             items = sorted(items, key=lambda p: p.imported_at, reverse=True)[:100]
         elif section.startswith("folder:"):

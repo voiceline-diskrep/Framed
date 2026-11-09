@@ -37,6 +37,7 @@ class FramedMainWindow(QMainWindow):
         # Set application window icon
         self.setWindowIcon(render_icon("loupe", 32, COLOR_ACCENT))
         theme_manager.theme_changed.connect(self._on_theme_changed)
+        self.culling_queue = []
 
         # Stacked central container
         self.stack = QStackedWidget(self)
@@ -95,6 +96,7 @@ class FramedMainWindow(QMainWindow):
         self.dashboard_view.open_settings_requested.connect(self._open_settings)
         self.dashboard_view.fullscreen_requested.connect(self.toggle_fullscreen)
         self.dashboard_view.gallery_requested.connect(self._show_gallery)
+        self.dashboard_view.resume_culling_queue_requested.connect(self._start_culling_queue)
 
         # Gallery View signals
         self.gallery_view.mode_switch_requested.connect(self._on_gallery_mode_switch)
@@ -157,9 +159,32 @@ class FramedMainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.review_view)
             self.review_view.setFocus()
 
+    def _start_culling_queue(self, project_ids: list):
+        if not project_ids:
+            return
+        self.culling_queue = list(project_ids)
+        first_pid = self.culling_queue.pop(0)
+        self._open_project(first_pid)
+
     def _show_dashboard(self):
         self.review_view.unload_project()
         self.video_review_view.unload_project()
+        if hasattr(self, "culling_queue") and self.culling_queue:
+            next_pid = self.culling_queue.pop(0)
+            proj = storage.get_project_by_id(next_pid)
+            if proj:
+                rem = len(self.culling_queue)
+                ans = QMessageBox.question(
+                    self,
+                    "Next Queued Session",
+                    f"Open next session in culling queue: '{proj.name}'?\n({rem} session(s) remaining in queue)",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                if ans == QMessageBox.Yes:
+                    self._open_project(next_pid)
+                    return
+                else:
+                    self.culling_queue.clear()
         self.dashboard_view.refresh()
         self.stack.setCurrentWidget(self.dashboard_view)
 

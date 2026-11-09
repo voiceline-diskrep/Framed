@@ -869,16 +869,52 @@ class DeleteGalleryFolderDialog(QDialog):
         btns.addStretch()
         b_cancel = QPushButton("Cancel")
         b_cancel.clicked.connect(self.reject)
-        b_del = QPushButton("Delete Folder Safely")
-        b_del.setObjectName("DangerBtn")
-        b_del.clicked.connect(self._confirm)
+        
+        self.b_del = QPushButton("Delete Folder Safely (5s)")
+        self.b_del.setObjectName("DangerBtn")
+        self.b_del.setEnabled(False)
+        self.b_del.setStyleSheet("""
+            QPushButton#DangerBtn:disabled {
+                background-color: #2E1B1E;
+                color: #7F5559;
+                border: 1px solid #4D262B;
+            }
+        """)
+        self.b_del.clicked.connect(self._confirm)
+        
+        self.countdown = 5
+        self.del_timer = QTimer(self)
+        self.del_timer.timeout.connect(self._on_del_tick)
+        self.del_timer.start(1000)
+
         btns.addWidget(b_cancel)
-        btns.addWidget(b_del)
+        btns.addWidget(self.b_del)
         v.addLayout(btns)
 
+    def _on_del_tick(self):
+        self.countdown -= 1
+        if self.countdown > 0:
+            self.b_del.setText(f"Delete Folder Safely ({self.countdown}s)")
+        else:
+            self.del_timer.stop()
+            self.b_del.setEnabled(True)
+            self.b_del.setText("Delete Folder Safely")
+
     def _confirm(self):
+        if hasattr(self, "del_timer") and self.del_timer.isActive():
+            self.del_timer.stop()
         self.target_folder_id = self.combo.currentData()
         self.accept()
+
+    def reject(self):
+        if hasattr(self, "del_timer") and self.del_timer.isActive():
+            self.del_timer.stop()
+        super().reject()
+
+    def closeEvent(self, event):
+        if hasattr(self, "del_timer") and self.del_timer.isActive():
+            self.del_timer.stop()
+        super().closeEvent(event)
 
 
 # ==============================================================================

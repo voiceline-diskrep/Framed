@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QMenu, QInputDialog, QMessageBox, QFileDialog,
     QSizePolicy, QToolButton
 )
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QSize
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QSize
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPainterPath, QPixmap,
     QFont, QLinearGradient, QCursor, QAction
@@ -854,25 +854,36 @@ class GalleryView(QWidget):
 
         # Bottom Edit Folder & Delete buttons
         bot_btns = QHBoxLayout()
-        bot_btns.setSpacing(6)
-        btn_edit_f = QPushButton(" Edit Folder")
-        btn_edit_f.setIcon(render_icon("edit", 12, "#D4D4D8"))
+        bot_btns.setSpacing(4)
+
+        btn_sub_f = QPushButton("+ Subfolder")
+        btn_sub_f.setIcon(render_icon("plus", 11, "#F59E0B"))
+        btn_sub_f.setCursor(Qt.PointingHandCursor)
+        btn_sub_f.setStyleSheet(
+            "QPushButton { background-color: #1C2026; color: #F59E0B; border: 1px solid #2D323E; border-radius: 6px; padding: 6px 4px; font-size: 11px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #252A34; border-color: #F59E0B; }"
+        )
+        btn_sub_f.clicked.connect(self._prompt_create_subfolder_for_current)
+
+        btn_edit_f = QPushButton("Edit")
+        btn_edit_f.setIcon(render_icon("edit", 11, "#D4D4D8"))
         btn_edit_f.setCursor(Qt.PointingHandCursor)
         btn_edit_f.setStyleSheet(
-            "QPushButton { background-color: #1C2026; color: #D4D4D8; border: 1px solid #2D323E; border-radius: 6px; padding: 6px 8px; font-size: 11px; font-weight: 600; }"
+            "QPushButton { background-color: #1C2026; color: #D4D4D8; border: 1px solid #2D323E; border-radius: 6px; padding: 6px 4px; font-size: 11px; font-weight: 600; }"
             "QPushButton:hover { background-color: #252A34; }"
         )
         btn_edit_f.clicked.connect(self._prompt_rename_current_folder)
 
-        btn_del_f = QPushButton(" Delete")
-        btn_del_f.setIcon(render_icon("trash", 12, "#EF4444"))
+        btn_del_f = QPushButton("Delete")
+        btn_del_f.setIcon(render_icon("trash", 11, "#EF4444"))
         btn_del_f.setCursor(Qt.PointingHandCursor)
         btn_del_f.setStyleSheet(
-            "QPushButton { background-color: #241619; color: #F87171; border: 1px solid #5C2126; border-radius: 6px; padding: 6px 8px; font-size: 11px; font-weight: 600; }"
+            "QPushButton { background-color: #241619; color: #F87171; border: 1px solid #5C2126; border-radius: 6px; padding: 6px 4px; font-size: 11px; font-weight: 600; }"
             "QPushButton:hover { background-color: #361C21; }"
         )
         btn_del_f.clicked.connect(self._prompt_delete_current_folder)
 
+        bot_btns.addWidget(btn_sub_f, 1)
         bot_btns.addWidget(btn_edit_f, 1)
         bot_btns.addWidget(btn_del_f, 1)
         sv.addLayout(bot_btns)
@@ -943,6 +954,7 @@ class GalleryView(QWidget):
 
             row_btn.mousePressEvent = lambda e, k=section_key: self._select_section(k)
             self.nav_v.addWidget(row_btn)
+            return row_btn
 
         # Primary items
         add_nav_row("all", "All Photos", "gallery", stats["total_photos"])
@@ -974,13 +986,17 @@ class GalleryView(QWidget):
             top_folders = storage.get_top_level_gallery_folders()
             for tf in top_folders:
                 children = storage.get_gallery_subfolders(tf.id)
-                # Sum parent + child counts for display
                 total_f_count = f_counts.get(tf.id, 0) + sum(f_counts.get(c.id, 0) for c in children)
                 c_sym = ("▾" if tf.id in self.expanded_parent_folders else "▸") if children else ""
-                add_nav_row(f"folder:{tf.id}", tf.name, "folder", total_f_count, indent=8, chevron=c_sym)
+                p_row = add_nav_row(f"folder:{tf.id}", tf.name, "folder", total_f_count, indent=8, chevron=c_sym)
+                p_row.setContextMenuPolicy(Qt.CustomContextMenu)
+                p_row.customContextMenuRequested.connect(lambda pos, fid=tf.id: self._on_folder_context_menu(pos, fid))
+
                 if children and tf.id in self.expanded_parent_folders:
                     for ch in children:
-                        add_nav_row(f"folder:{ch.id}", ch.name, "folder", f_counts.get(ch.id, 0), indent=24)
+                        c_row = add_nav_row(f"folder:{ch.id}", ch.name, "folder", f_counts.get(ch.id, 0), indent=24)
+                        c_row.setContextMenuPolicy(Qt.CustomContextMenu)
+                        c_row.customContextMenuRequested.connect(lambda pos, fid=ch.id: self._on_folder_context_menu(pos, fid))
 
             # '+ Create Folder' inline button
             btn_cf = QPushButton("  +   Create Folder")
@@ -1032,7 +1048,6 @@ class GalleryView(QWidget):
             self.nav_v.addWidget(btn_new_sa)
 
         add_nav_row("memories", "Memories", "calendar")
-        add_nav_row("map", "Map View", "map_pin")
         add_nav_row("missing", "Missing Files", "warning", stats["missing_count"], is_red_badge=True)
         add_nav_row("deleted", "Recently Deleted", "trash", stats["deleted_count"] if stats["deleted_count"] > 0 else None)
 
@@ -1248,13 +1263,10 @@ class GalleryView(QWidget):
         c_fav = QuickFeatureBannerCard("favorites", "Favorites", "Your starred photos", "heart_filled", "#F59E0B")
         c_fav.clicked.connect(lambda: self._select_section("favorites"))
 
-        c_map = QuickFeatureBannerCard("map", "Map View", "Explore by location", "map_pin", "#F59E0B")
-        c_map.clicked.connect(lambda: self._select_section("map"))
-
         c_mis = QuickFeatureBannerCard("missing", "Missing Files", "Find lost photos", "warning", "#F59E0B")
         c_mis.clicked.connect(lambda: self._select_section("missing"))
 
-        for c in (c_new, c_mem, c_fav, c_map, c_mis):
+        for c in (c_new, c_mem, c_fav, c_mis):
             cards_row.addWidget(c, 1)
 
         parent_layout.addLayout(cards_row)
@@ -1301,10 +1313,7 @@ class GalleryView(QWidget):
         self.grid_scroll.setWidget(self.grid_container)
         self.browser_stack.addWidget(self.grid_scroll)
 
-        # Page 1: Interactive Vector World Map View
-        self.map_widget = InteractiveWorldMapWidget()
-        self.map_widget.photo_selected.connect(self._open_photo_viewer_single)
-        self.browser_stack.addWidget(self.map_widget)
+
 
         parent_layout.addWidget(self.browser_stack, 1)
 
@@ -1576,11 +1585,7 @@ class GalleryView(QWidget):
         # Update context banner for Missing Files or Recently Deleted
         self._update_context_banner()
 
-        if self.current_section == "map":
-            self.browser_stack.setCurrentIndex(1)
-            active = [p for p in storage.gallery_photos.values() if not p.is_deleted]
-            self.map_widget.set_photos(active)
-            return
+
 
         self.browser_stack.setCurrentIndex(0)
 
@@ -1974,20 +1979,82 @@ class GalleryView(QWidget):
             storage.rename_gallery_folder(fid, new_name.strip())
             self.refresh_all()
 
+    def _on_folder_context_menu(self, pos: QPoint, folder_id: str):
+        folder = storage.get_gallery_folder(folder_id)
+        if not folder:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1A1D24;
+                border: 1px solid #30343C;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 18px;
+                color: #F4F4F5;
+                font-size: 12px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #262A34;
+                color: #F59E0B;
+            }
+        """)
+        act_sub = menu.addAction(f"+ New Subfolder in '{folder.name}'")
+        act_sub.triggered.connect(lambda: self._prompt_create_subfolder(folder_id))
+        act_ren = menu.addAction(f"Rename '{folder.name}'")
+        act_ren.triggered.connect(lambda: self._prompt_rename_folder_by_id(folder_id))
+        menu.addSeparator()
+        act_del = menu.addAction(f"Delete '{folder.name}'")
+        act_del.triggered.connect(lambda: self._prompt_delete_folder_by_id(folder_id))
+        menu.exec(QCursor.pos())
+
+    def _prompt_create_subfolder_for_current(self):
+        target_pid = None
+        if self.current_section.startswith("folder:"):
+            target_pid = self.current_section.split(":", 1)[1]
+        self._prompt_create_subfolder(target_pid)
+
+    def _prompt_create_subfolder(self, parent_id: Optional[str] = None):
+        parent_folder = storage.get_gallery_folder(parent_id) if parent_id else None
+        p_name = f" in '{parent_folder.name}'" if parent_folder else ""
+        name, ok = QInputDialog.getText(self, "New Subfolder", f"Enter subfolder name{p_name}:")
+        if ok and name.strip():
+            new_f = storage.create_gallery_folder(name.strip(), parent_id=parent_id)
+            if parent_id:
+                self.expanded_parent_folders.add(parent_id)
+            self.current_section = f"folder:{new_f.id}"
+            self.refresh_all()
+
+    def _prompt_rename_folder_by_id(self, folder_id: str):
+        folder = storage.get_gallery_folder(folder_id)
+        if not folder:
+            return
+        new_name, ok = QInputDialog.getText(self, "Rename Folder", f"Rename '{folder.name}' to:", text=folder.name)
+        if ok and new_name.strip():
+            storage.rename_gallery_folder(folder_id, new_name.strip())
+            self.refresh_all()
+
+    def _prompt_delete_folder_by_id(self, folder_id: str):
+        folder = storage.get_gallery_folder(folder_id)
+        if not folder:
+            return
+        cnt = sum(1 for p in storage.gallery_photos.values() if folder_id in p.folder_ids and not p.is_deleted)
+        dlg = DeleteGalleryFolderDialog(folder, cnt, self)
+        if dlg.exec() == QDialog.Accepted:
+            storage.delete_gallery_folder(folder_id, reassign_to_folder_id=dlg.target_folder_id)
+            if self.current_section == f"folder:{folder_id}":
+                self.current_section = "all"
+            self.refresh_all()
+
     def _prompt_delete_current_folder(self):
         if not self.current_section.startswith("folder:"):
             QMessageBox.information(self, "Select a Folder", "Please select a custom folder in the left sidebar to delete.")
             return
         fid = self.current_section.split(":", 1)[1]
-        folder = storage.get_gallery_folder(fid)
-        if not folder:
-            return
-        cnt = sum(1 for p in storage.gallery_photos.values() if fid in p.folder_ids and not p.is_deleted)
-        dlg = DeleteGalleryFolderDialog(folder, cnt, self)
-        if dlg.exec() == QDialog.Accepted:
-            storage.delete_gallery_folder(fid, reassign_to_folder_id=dlg.target_folder_id)
-            self.current_section = "all"
-            self.refresh_all()
+        self._prompt_delete_folder_by_id(fid)
 
     def _on_card_favorite_toggled(self, photo: GalleryPhoto):
         storage.toggle_gallery_favorite(photo.id)
@@ -2071,11 +2138,22 @@ class GalleryView(QWidget):
         self.refresh_all()
 
     def _remove_missing_refs(self):
-        missing = [p.id for p in storage.gallery_photos.values() if p.is_missing and not p.is_deleted]
+        missing = [
+            p.id for p in storage.gallery_photos.values()
+            if not p.is_deleted and (p.is_missing or not (p.active_path and os.path.exists(p.active_path)))
+        ]
         if not missing:
+            QMessageBox.information(self, "No Missing Files", "There are no missing files in your Gallery.")
             return
-        storage.permanently_remove_photos(missing, delete_from_disk=False)
-        self.refresh_all()
+        ans = QMessageBox.question(
+            self,
+            "Remove Missing References",
+            f"Remove {len(missing)} missing reference(s) from your Gallery?\n\nOriginal photos on disk are never deleted.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if ans == QMessageBox.Yes:
+            storage.permanently_remove_photos(missing, delete_from_disk=False)
+            self.refresh_all()
 
     def _restore_all_deleted(self):
         deleted_ids = [p.id for p in storage.gallery_photos.values() if p.is_deleted]
