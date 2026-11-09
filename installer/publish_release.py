@@ -14,7 +14,7 @@ def get_token():
     raise ValueError("GitHub token not found in git credential manager")
 
 def publish_release(
-    tag: str = "v1.3.2",
+    tag: str = "v1.3.3",
     target_branch: str = "master",
     prerelease: bool = False
 ):

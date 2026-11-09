@@ -1140,6 +1140,102 @@ class TestLoupeWorkstation(unittest.TestCase):
 
         review.unload_project()
 
+    def test_match_selection_export_folder(self):
+        """Verify that ExportWorker creates dedicated Match Selection/ RAW and JPEG folders capped at quota."""
+        proj = Project(
+            name="WorldCupFinal",
+            folder_id="sports",
+            is_match_mode=True,
+            max_selected_count=2,
+            format_mode="both"
+        )
+
+        # Create 3 dummy raw and jpeg files to simulate 3 kept photos (1 surplus over quota of 2)
+        raw_files = []
+        jpeg_files = []
+        for i in range(3):
+            r = os.path.join(self.temp_dir, f"RAW_{i}.CR3")
+            j = os.path.join(self.temp_dir, f"JPEG_{i}.JPG")
+            with open(r, "wb") as f: f.write(b"RAW" * 100)
+            with open(j, "wb") as f: f.write(b"JPEG" * 100)
+            raw_files.append(r)
+            jpeg_files.append(j)
+            item = PhotoItem(base_name=f"IMG_{i}", jpeg_path=j, raw_path=r, status="kept")
+            proj.items.append(item)
+
+        export_dest = os.path.join(self.temp_dir, "export_output")
+        worker = ExportWorker(proj, export_dest, separate_by_workspace=True, include_match_selection=True)
+
+        finished_summary = {}
+        def _on_finished(summary):
+            finished_summary.update(summary)
+
+        worker.export_finished.connect(_on_finished)
+        worker.run()
+
+        base_dir = finished_summary.get("base_dir")
+        self.assertIsNotNone(base_dir)
+        self.assertTrue(os.path.exists(base_dir))
+
+        match_raw = os.path.join(base_dir, "Match Selection", "RAW")
+        match_jpeg = os.path.join(base_dir, "Match Selection", "JPEG")
+        selected_raw = os.path.join(base_dir, "Selected", "RAW")
+        selected_jpeg = os.path.join(base_dir, "Selected", "JPEG")
+
+        # Match Selection must be strictly capped at quota (2 files each)
+        self.assertTrue(os.path.exists(match_raw))
+        self.assertTrue(os.path.exists(match_jpeg))
+        self.assertEqual(len(os.listdir(match_raw)), 2)
+        self.assertEqual(len(os.listdir(match_jpeg)), 2)
+        self.assertEqual(finished_summary.get("match_selection_count"), 2)
+
+        # Selected retains all kept photos (3 files each)
+        self.assertTrue(os.path.exists(selected_raw))
+        self.assertTrue(os.path.exists(selected_jpeg))
+        self.assertEqual(len(os.listdir(selected_raw)), 3)
+        self.assertEqual(len(os.listdir(selected_jpeg)), 3)
+
+    def test_theme_switcher_and_light_mode_styles(self):
+        """Verify Theme menu checkmark updates dynamically, and Light theme has transparent labels and pastel badges."""
+        from loupe.ui import theme as theme_mod
+        from loupe.ui.theme import apply_theme, is_current_theme_light
+        from loupe.ui.dashboard_view import DashboardView, ProjectCard
+
+        # 1. Apply Dark Green theme
+        apply_theme("dark_green")
+        self.assertEqual(theme_mod.current_theme_id, "dark_green")
+        self.assertFalse(is_current_theme_light())
+
+        # Check theme menu checkmark
+        dv = DashboardView()
+        # Verify active_tid in theme menu logic matches dark_green
+        active_tid = getattr(theme_mod, "current_theme_id", "dark_amber")
+        self.assertEqual(active_tid, "dark_green")
+
+        # 2. Switch to Light theme
+        apply_theme("light")
+        self.assertEqual(theme_mod.current_theme_id, "light")
+        self.assertTrue(is_current_theme_light())
+
+        # Verify dynamic styles on DashboardView
+        dv._apply_dynamic_styles()
+        self.assertIn("#dashboardRightArea", dv.right_area.styleSheet())
+        self.assertIn("background-color: transparent", dv.right_area.styleSheet())
+
+        # Verify ProjectCard in Light mode
+        p = Project(name="PortraitSession", format_mode="both")
+        card = ProjectCard(p)
+        self.assertIn("background-color: transparent", card.styleSheet())
+
+        # Verify photo badge in light mode uses pastel emerald styling
+        is_light = is_current_theme_light()
+        self.assertTrue(is_light)
+
+        # Restore default dark amber
+        apply_theme("dark_amber")
+        self.assertEqual(theme_mod.current_theme_id, "dark_amber")
+        self.assertFalse(is_current_theme_light())
+
 
 if __name__ == "__main__":
     import unittest

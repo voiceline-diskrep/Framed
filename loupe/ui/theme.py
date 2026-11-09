@@ -267,6 +267,8 @@ def apply_theme(theme_id: str, app: Optional[QApplication] = None) -> bool:
             for k, v in theme_def.colors.items():
                 if hasattr(mod, k):
                     setattr(mod, k, v)
+            if hasattr(mod, "current_theme_id"):
+                setattr(mod, "current_theme_id", theme_id)
 
     # 3. Apply Qt Palette and Stylesheet
     app = app or QApplication.instance()
@@ -405,6 +407,7 @@ def get_application_stylesheet() -> str:
 
     QLabel {{
         color: {COLOR_TEXT_PRIMARY};
+        background-color: transparent;
     }}
 
     QMainWindow, QDialog, QWidget#centralWidget {{

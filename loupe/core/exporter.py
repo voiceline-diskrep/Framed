@@ -18,11 +18,12 @@ class ExportWorker(QThread):
     export_finished = Signal(dict)                  # summary_dict
     export_failed = Signal(str)                     # error_message
 
-    def __init__(self, project: Project, destination_root: str, separate_by_workspace: bool = True, parent=None):
+    def __init__(self, project: Project, destination_root: str, separate_by_workspace: bool = True, include_match_selection: bool = True, parent=None):
         super().__init__(parent)
         self.project = project
         self.destination_root = destination_root
         self.separate_by_workspace = separate_by_workspace
+        self.include_match_selection = include_match_selection
         self._is_cancelled = False
 
     def cancel(self):
@@ -37,6 +38,8 @@ class ExportWorker(QThread):
             else:
                 base_dir = os.path.join(self.destination_root, proj_folder_name)
             
+            match_raw = os.path.join(base_dir, "Match Selection", "RAW")
+            match_jpeg = os.path.join(base_dir, "Match Selection", "JPEG")
             selected_raw = os.path.join(base_dir, "Selected", "RAW")
             selected_jpeg = os.path.join(base_dir, "Selected", "JPEG")
             maybe_raw = os.path.join(base_dir, "Maybe", "RAW")
@@ -66,6 +69,19 @@ class ExportWorker(QThread):
                 if include_jpeg and item.jpeg_path and os.path.exists(item.jpeg_path):
                     tasks.append((item.jpeg_path, target_jpeg_dir))
 
+            # If Match Mode is active and Match Selection export is requested, copy quota items
+            match_selection_count = 0
+            if self.include_match_selection and getattr(self.project, "is_match_mode", False):
+                quota = getattr(self.project, "max_selected_count", 0)
+                kept_items = [it for it in self.project.items if it.status in ("kept", "selected")]
+                match_items = kept_items[:quota] if quota > 0 else kept_items
+                match_selection_count = len(match_items)
+                for item in match_items:
+                    if include_raw and item.raw_path and os.path.exists(item.raw_path):
+                        tasks.append((item.raw_path, match_raw))
+                    if include_jpeg and item.jpeg_path and os.path.exists(item.jpeg_path):
+                        tasks.append((item.jpeg_path, match_jpeg))
+
             # Include any 'edited result' Lightroom photos if present
             edited_dest_dir = os.path.join(base_dir, "edited result")
             if self.project.edited_files:
@@ -89,6 +105,7 @@ class ExportWorker(QThread):
                     "selected_count": 0,
                     "maybe_count": 0,
                     "unselected_count": 0,
+                    "match_selection_count": 0,
                 })
                 return
 
@@ -128,6 +145,7 @@ class ExportWorker(QThread):
                 "selected_count": self.project.kept_count,
                 "maybe_count": self.project.maybe_count,
                 "unselected_count": self.project.rejected_count + self.project.pending_count,
+                "match_selection_count": match_selection_count,
             })
 
         except Exception as e:

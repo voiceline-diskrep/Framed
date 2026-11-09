@@ -180,6 +180,15 @@ class ExportDialog(QDialog):
         self.cb_workspace.toggled.connect(self._on_workspace_toggled)
         dest_layout.addWidget(self.cb_workspace)
 
+        if getattr(self.project, "is_match_mode", False):
+            quota = getattr(self.project, "max_selected_count", 0)
+            m_count = min(self.project.kept_count, quota) if quota > 0 else self.project.kept_count
+            self.cb_match_selection = QCheckBox(f"Export Match Selection folder ({m_count} quota photos for easy sharing)")
+            self.cb_match_selection.setFont(get_body_font(12))
+            self.cb_match_selection.setChecked(True)
+            self.cb_match_selection.toggled.connect(lambda _: self._update_hierarchy_preview())
+            dest_layout.addWidget(self.cb_match_selection)
+
         content_layout.addLayout(dest_layout)
 
         # Google Drive Category Selection Card (Visible when Google Drive mode is selected)
@@ -199,6 +208,14 @@ class ExportDialog(QDialog):
         t_gc.setFont(get_mono_font(10, bold=True))
         t_gc.setStyleSheet(f"color: {COLOR_ACCENT};")
         gc_layout.addWidget(t_gc)
+
+        if getattr(self.project, "is_match_mode", False):
+            quota = getattr(self.project, "max_selected_count", 0)
+            m_count = min(self.project.kept_count, quota) if quota > 0 else self.project.kept_count
+            self.cb_up_match = QCheckBox(f"Match Selection ({m_count} photos)")
+            self.cb_up_match.setChecked(True)
+            self.cb_up_match.toggled.connect(self._update_hierarchy_preview)
+            gc_layout.addWidget(self.cb_up_match)
 
         self.cb_up_selected = QCheckBox(f"Selected ({self.project.kept_count} photos)")
         self.cb_up_selected.setChecked(True)
@@ -447,6 +464,18 @@ class ExportDialog(QDialog):
                 f"{prefix}└── 📁 JPEG/",
             ]
 
+        is_match = getattr(self.project, "is_match_mode", False)
+        inc_match = is_match and (
+            (not is_gdrive and hasattr(self, "cb_match_selection") and self.cb_match_selection.isChecked()) or
+            (is_gdrive and hasattr(self, "cb_up_match") and self.cb_up_match.isChecked())
+        )
+        quota = getattr(self.project, "max_selected_count", 0)
+        m_count = min(self.project.kept_count, quota) if quota > 0 else self.project.kept_count
+
+        if inc_match:
+            lines.append(f"{indent}├── 📁 Match Selection/ ({m_count} photos)")
+            lines.extend(_fmt_subfolders(f"{indent}│    "))
+
         inc_sel = not is_gdrive or self.cb_up_selected.isChecked()
         inc_maybe = (not is_gdrive and self.project.maybe_count > 0) or (is_gdrive and self.cb_up_maybe.isChecked() and self.project.maybe_count > 0)
         inc_unsel = not is_gdrive or self.cb_up_unselected.isChecked()
@@ -488,6 +517,7 @@ class ExportDialog(QDialog):
             self.dest_edit.setEnabled(False)
             self.cancel_btn.setText("Cancel Upload")
 
+            inc_match = self.cb_up_match.isChecked() if hasattr(self, "cb_up_match") else False
             self.gdrive_worker = GDriveUploadWorker(
                 project=self.project,
                 parent_folder_id=parent_id,
@@ -496,6 +526,7 @@ class ExportDialog(QDialog):
                 include_maybe=self.cb_up_maybe.isChecked(),
                 include_unselected=self.cb_up_unselected.isChecked(),
                 include_edited=self.cb_up_edited.isChecked(),
+                include_match_selection=inc_match,
                 parent=self
             )
             self.gdrive_worker.telemetry_update.connect(self._on_gdrive_telemetry)
@@ -513,7 +544,8 @@ class ExportDialog(QDialog):
         self.dest_edit.setEnabled(False)
         self.cancel_btn.setText("Cancel Copy")
 
-        self.worker = ExportWorker(self.project, dest_root, separate_by_workspace=use_ws, parent=self)
+        inc_match = self.cb_match_selection.isChecked() if hasattr(self, "cb_match_selection") else False
+        self.worker = ExportWorker(self.project, dest_root, separate_by_workspace=use_ws, include_match_selection=inc_match, parent=self)
         self.worker.progress_update.connect(self._on_progress)
         self.worker.export_finished.connect(self._on_finished)
         self.worker.export_failed.connect(self._on_failed)

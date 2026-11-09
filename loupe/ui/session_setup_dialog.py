@@ -16,7 +16,7 @@ from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS, COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED, COLOR_ACCENT, COLOR_STATUS_KEPT,
-    COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font
+    COLOR_STATUS_REJECTED, get_display_font, get_body_font, get_mono_font, theme_manager
 )
 from loupe.ui.icons import render_icon
 

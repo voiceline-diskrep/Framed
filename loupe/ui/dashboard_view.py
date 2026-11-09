@@ -14,13 +14,14 @@ from PySide6.QtGui import QPainter, QColor
 from loupe.models import Folder, Project
 from loupe.storage import storage
 from loupe.config import config
+from loupe.ui import theme as theme_mod
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BG_HOVER, COLOR_BG_ACTIVE,
     COLOR_BORDER_SUBTLE, COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS,
     COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_MUTED,
     COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED,
     get_display_font, get_body_font, get_mono_font,
-    THEMES, current_theme_id, apply_theme, theme_manager
+    THEMES, current_theme_id, apply_theme, theme_manager, is_current_theme_light
 )
 from loupe.ui.icons import render_icon
 
@@ -663,6 +664,9 @@ class ProjectCard(QFrame):
                 border-color: {COLOR_TEXT_SECONDARY};
                 background-color: {COLOR_BG_ELEVATED};
             }}
+            QFrame#projectCardFrame QLabel {{
+                background-color: transparent;
+            }}
         """)
         
         main_layout = QHBoxLayout(self)
@@ -684,10 +688,17 @@ class ProjectCard(QFrame):
         is_vid = getattr(project, "media_type", "photo") == "video"
         type_badge = QLabel("VIDEO" if is_vid else "PHOTO")
         type_badge.setFont(get_mono_font(10, bold=True))
+        is_light = is_current_theme_light()
         if is_vid:
-            type_badge.setStyleSheet("color: #FFAE42; background-color: #2D2214; padding: 2px 6px; border: 1px solid #754B1A; border-radius: 2px;")
+            if is_light:
+                type_badge.setStyleSheet("color: #B45309; background-color: #FEF3C7; padding: 2px 6px; border: 1px solid #F59E0B; border-radius: 2px;")
+            else:
+                type_badge.setStyleSheet("color: #FFAE42; background-color: #2D2214; padding: 2px 6px; border: 1px solid #754B1A; border-radius: 2px;")
         else:
-            type_badge.setStyleSheet("color: #7BE4A2; background-color: #1A3323; padding: 2px 6px; border: 1px solid #2E7D32; border-radius: 2px;")
+            if is_light:
+                type_badge.setStyleSheet("color: #15803D; background-color: #DCFCE7; padding: 2px 6px; border: 1px solid #22C55E; border-radius: 2px;")
+            else:
+                type_badge.setStyleSheet("color: #7BE4A2; background-color: #1A3323; padding: 2px 6px; border: 1px solid #2E7D32; border-radius: 2px;")
         title_row.addWidget(type_badge)
 
         edit_session_btn = QPushButton("Edit")
@@ -778,10 +789,19 @@ class ProjectCard(QFrame):
         status_layout.setSpacing(12)
 
         status_text = project.status_label
-        status_color = COLOR_STATUS_KEPT if "Completed" in status_text else (COLOR_ACCENT if "Progress" in status_text else COLOR_TEXT_MUTED)
+        if is_light:
+            if "Completed" in status_text:
+                status_style = "color: #15803D; background-color: #DCFCE7; padding: 3px 8px; border: 1px solid #86EFAC; border-radius: 2px;"
+            elif "Progress" in status_text:
+                status_style = f"color: #B45309; background-color: #FEF3C7; padding: 3px 8px; border: 1px solid #FCD34D; border-radius: 2px;"
+            else:
+                status_style = f"color: {COLOR_TEXT_MUTED}; background-color: {COLOR_BG_ELEVATED}; padding: 3px 8px; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 2px;"
+        else:
+            status_color = COLOR_STATUS_KEPT if "Completed" in status_text else (COLOR_ACCENT if "Progress" in status_text else COLOR_TEXT_MUTED)
+            status_style = f"color: {status_color}; background-color: {COLOR_BG_BASE}; padding: 3px 8px; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 2px;"
         status_badge = QLabel(status_text)
         status_badge.setFont(get_mono_font(11, bold=True))
-        status_badge.setStyleSheet(f"color: {status_color}; background-color: {COLOR_BG_BASE}; padding: 3px 8px; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 2px;")
+        status_badge.setStyleSheet(status_style)
         status_layout.addWidget(status_badge)
 
         if is_vid:
@@ -809,7 +829,10 @@ class ProjectCard(QFrame):
             if edited_count > 0:
                 edited_badge = QLabel(f"✓ {edited_count} photo(s) in 'edited result'")
                 edited_badge.setFont(get_mono_font(11, bold=True))
-                edited_badge.setStyleSheet(f"color: {COLOR_ACCENT}; background-color: #261E14; padding: 3px 8px; border: 1px solid #754B1A; border-radius: 2px;")
+                if is_light:
+                    edited_badge.setStyleSheet(f"color: {COLOR_ACCENT}; background-color: #EFF6FF; padding: 3px 8px; border: 1px solid {COLOR_ACCENT}; border-radius: 2px;")
+                else:
+                    edited_badge.setStyleSheet(f"color: {COLOR_ACCENT}; background-color: #261E14; padding: 3px 8px; border: 1px solid #754B1A; border-radius: 2px;")
                 edited_layout.addWidget(edited_badge)
 
                 add_more_btn = QPushButton("+ Add Files")
@@ -835,12 +858,13 @@ class ProjectCard(QFrame):
                 open_folder_btn = QPushButton("Open Folder")
                 open_folder_btn.setIcon(render_icon("folder", 12, COLOR_ACCENT))
                 open_folder_btn.setFont(get_body_font(11))
+                open_bg = "#EFF6FF" if is_light else "#221A12"
                 open_folder_btn.setStyleSheet(f"""
                     QPushButton {{
                         padding: 3px 10px;
                         color: {COLOR_ACCENT};
                         border: 1px solid {COLOR_ACCENT};
-                        background-color: #221A12;
+                        background-color: {open_bg};
                         font-weight: 600;
                         border-radius: 2px;
                     }}
@@ -861,6 +885,7 @@ class ProjectCard(QFrame):
                 add_btn = QPushButton("+ Add Files (LRC)")
                 add_btn.setIcon(render_icon("plus", 12, COLOR_ACCENT))
                 add_btn.setFont(get_body_font(11))
+                add_hover_bg = COLOR_BG_HOVER if is_light else "#2A2216"
                 add_btn.setStyleSheet(f"""
                     QPushButton {{
                         padding: 3px 10px;
@@ -871,7 +896,7 @@ class ProjectCard(QFrame):
                     }}
                     QPushButton:hover {{
                         border-color: {COLOR_ACCENT};
-                        background-color: #2A2216;
+                        background-color: {add_hover_bg};
                     }}
                 """)
                 add_btn.setToolTip("Add photos already edited in Lightroom Classic. Framed will store them in 'edited result' folder.")
@@ -924,6 +949,7 @@ class ProjectCard(QFrame):
         self.del_btn.setToolTip("Delete Session")
         self.del_btn.setMinimumHeight(36)
         self.del_btn.setFixedWidth(36)
+        del_hover_bg = "#FEE2E2" if is_light else "#2E1517"
         self.del_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLOR_BG_ELEVATED};
@@ -931,7 +957,7 @@ class ProjectCard(QFrame):
                 border-radius: 2px;
             }}
             QPushButton:hover {{
-                background-color: #2E1517;
+                background-color: {del_hover_bg};
                 border-color: {COLOR_STATUS_REJECTED};
             }}
         """)
@@ -1053,13 +1079,8 @@ class DashboardView(QWidget):
         root_layout.setSpacing(0)
 
         # Top Header Bar
-        header_bar = QFrame()
-        header_bar.setStyleSheet(f"""
-            QFrame {{
-                background-color: {COLOR_BG_SURFACE};
-                border-bottom: 1px solid {COLOR_BORDER_DISTINCT};
-            }}
-        """)
+        self.header_bar = QFrame()
+        header_bar = self.header_bar
         header_layout = QHBoxLayout(header_bar)
         header_layout.setContentsMargins(24, 12, 24, 12)
         header_layout.setSpacing(18)
@@ -1078,14 +1099,8 @@ class DashboardView(QWidget):
         header_layout.addLayout(brand_layout)
 
         # Mode Switcher (Photo Sort | Video Sort)
-        mode_switcher_frame = QFrame()
-        mode_switcher_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {COLOR_BG_BASE};
-                border: 1px solid {COLOR_BORDER_DISTINCT};
-                border-radius: 4px;
-            }}
-        """)
+        self.mode_switcher_frame = QFrame()
+        mode_switcher_frame = self.mode_switcher_frame
         ms_layout = QHBoxLayout(mode_switcher_frame)
         ms_layout.setContentsMargins(3, 3, 3, 3)
         ms_layout.setSpacing(4)
@@ -1148,26 +1163,23 @@ class DashboardView(QWidget):
         content_layout.setSpacing(0)
 
         # Left Sidebar (Folders)
-        sidebar = QFrame()
+        self.sidebar = QFrame()
+        sidebar = self.sidebar
         sidebar.setFixedWidth(260)
-        sidebar.setStyleSheet(f"""
-            QFrame {{
-                background-color: {COLOR_BG_SURFACE};
-                border-right: 1px solid {COLOR_BORDER_DISTINCT};
-            }}
-        """)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(16, 20, 16, 16)
         sidebar_layout.setSpacing(14)
 
         sidebar_title_layout = QHBoxLayout()
-        sidebar_title = QLabel("WORKSPACE FOLDERS")
+        self.sidebar_title = QLabel("WORKSPACE FOLDERS")
+        sidebar_title = self.sidebar_title
         sidebar_title.setFont(get_mono_font(11, bold=True))
         sidebar_title.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; letter-spacing: 1px;")
         sidebar_title_layout.addWidget(sidebar_title)
         sidebar_title_layout.addStretch()
 
-        add_folder_btn = QPushButton()
+        self.add_folder_btn = QPushButton()
+        add_folder_btn = self.add_folder_btn
         add_folder_btn.setIcon(render_icon("plus", 12, COLOR_TEXT_PRIMARY))
         add_folder_btn.setToolTip("Create New Folder (e.g. School, Weddings, Personal)")
         add_folder_btn.setFixedSize(24, 24)
@@ -1220,8 +1232,8 @@ class DashboardView(QWidget):
         content_layout.addWidget(sidebar)
 
         # Right Area: Projects
-        right_area = QWidget()
-        right_area.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
+        self.right_area = QWidget()
+        right_area = self.right_area
         right_layout = QVBoxLayout(right_area)
         right_layout.setContentsMargins(32, 24, 32, 24)
         right_layout.setSpacing(20)
@@ -1286,8 +1298,138 @@ class DashboardView(QWidget):
             self.new_session_btn.setText("New Photo Session" if mode == "photo" else "New Video Session")
             self.media_mode_changed.emit(mode)
             self._load_projects_for_selection()
+        self._apply_dynamic_styles()
+
+    def _apply_dynamic_styles(self):
+        # 1. Header Bar
+        if hasattr(self, "header_bar"):
+            self.header_bar.setObjectName("dashboardHeaderBar")
+            self.header_bar.setStyleSheet(f"""
+                QFrame#dashboardHeaderBar {{
+                    background-color: {COLOR_BG_SURFACE};
+                    border-bottom: 1px solid {COLOR_BORDER_DISTINCT};
+                }}
+            """)
+
+        # 2. Sidebar Frame
+        if hasattr(self, "sidebar"):
+            self.sidebar.setObjectName("dashboardSidebar")
+            self.sidebar.setStyleSheet(f"""
+                QFrame#dashboardSidebar {{
+                    background-color: {COLOR_BG_SURFACE};
+                    border-right: 1px solid {COLOR_BORDER_DISTINCT};
+                }}
+            """)
+
+        # 3. Right Area (Scoped to object name so it NEVER bleeds down to child QLabels!)
+        if hasattr(self, "right_area"):
+            self.right_area.setObjectName("dashboardRightArea")
+            self.right_area.setStyleSheet(f"""
+                QWidget#dashboardRightArea {{
+                    background-color: {COLOR_BG_BASE};
+                }}
+                QLabel {{
+                    background-color: transparent;
+                }}
+            """)
+
+        # 4. Mode Switcher Frame
+        if hasattr(self, "mode_switcher_frame"):
+            self.mode_switcher_frame.setObjectName("modeSwitcherFrame")
+            self.mode_switcher_frame.setStyleSheet(f"""
+                QFrame#modeSwitcherFrame {{
+                    background-color: {COLOR_BG_BASE};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 4px;
+                }}
+            """)
+
+        # 5. Folder List Widget
+        if hasattr(self, "folder_list"):
+            self.folder_list.setStyleSheet(f"""
+                QListWidget {{
+                    background-color: transparent;
+                    border: none;
+                }}
+                QListWidget::item {{
+                    padding: 10px 12px;
+                    border-radius: 2px;
+                    color: {COLOR_TEXT_PRIMARY};
+                    margin-bottom: 2px;
+                }}
+                QListWidget::item:hover {{
+                    background-color: {COLOR_BG_HOVER};
+                }}
+                QListWidget::item:selected {{
+                    background-color: {COLOR_BG_ELEVATED};
+                    border-left: 3px solid {COLOR_ACCENT};
+                    font-weight: 600;
+                    color: {COLOR_TEXT_PRIMARY};
+                }}
+            """)
+
+        # 6. Buttons, labels, and brand
+        if hasattr(self, "brand_sub"):
+            self.brand_sub.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
+        if hasattr(self, "theme_btn"):
+            self.theme_btn.setIcon(render_icon("palette", 14, COLOR_ACCENT))
+        if hasattr(self, "settings_btn"):
+            self.settings_btn.setIcon(render_icon("settings", 14, COLOR_TEXT_PRIMARY))
+        if hasattr(self, "fullscreen_btn"):
+            self.fullscreen_btn.setIcon(render_icon("fit", 14, COLOR_TEXT_PRIMARY))
+        if hasattr(self, "add_folder_btn"):
+            self.add_folder_btn.setIcon(render_icon("plus", 12, COLOR_TEXT_PRIMARY))
+        if hasattr(self, "sidebar_title"):
+            self.sidebar_title.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; letter-spacing: 1px;")
+        if hasattr(self, "folder_title_lbl"):
+            self.folder_title_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        if hasattr(self, "project_count_lbl"):
+            self.project_count_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        if hasattr(self, "rename_folder_btn"):
+            self.rename_folder_btn.setIcon(render_icon("edit", 12, COLOR_TEXT_PRIMARY))
+        if hasattr(self, "delete_folder_btn"):
+            self.delete_folder_btn.setStyleSheet(f"color: {COLOR_STATUS_REJECTED};")
+        if hasattr(self, "header_edit_folder_btn"):
+            self.header_edit_folder_btn.setIcon(render_icon("edit", 12, COLOR_ACCENT))
+            self.header_edit_folder_btn.setStyleSheet(f"""
+                QPushButton {{
+                    padding: 3px 10px;
+                    color: {COLOR_ACCENT};
+                    border: 1px solid {COLOR_BORDER_SUBTLE};
+                    background-color: transparent;
+                    border-radius: 2px;
+                }}
+                QPushButton:hover {{
+                    border-color: {COLOR_ACCENT};
+                    background-color: {COLOR_BG_HOVER};
+                }}
+            """)
+
+        # 7. Modal overlay card styling
+        if hasattr(self, "modal_overlay") and hasattr(self.modal_overlay, "card"):
+            self.modal_overlay.card.setStyleSheet(f"""
+                QFrame#inAppModalCard {{
+                    background-color: {COLOR_BG_SURFACE};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 6px;
+                }}
+                QLineEdit, QComboBox, QDateEdit {{
+                    background-color: {COLOR_BG_ELEVATED};
+                    color: {COLOR_TEXT_PRIMARY};
+                    border: 1px solid {COLOR_BORDER_DISTINCT};
+                    border-radius: 3px;
+                    padding: 8px 12px;
+                    font-size: 13px;
+                }}
+                QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
+                    border-color: {COLOR_ACCENT};
+                }}
+            """)
+
+        self.refresh_cloud_status()
 
     def _open_theme_menu(self):
+        active_tid = getattr(theme_mod, "current_theme_id", config.get("theme", "dark_amber"))
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
@@ -1306,7 +1448,7 @@ class DashboardView(QWidget):
             }}
         """)
         for t_id, t_def in THEMES.items():
-            prefix = "✓  " if t_id == current_theme_id else "     "
+            prefix = "✓  " if t_id == active_tid else "     "
             action = menu.addAction(f"{prefix}{t_def.name}")
             action.triggered.connect(lambda checked=False, tid=t_id: self._set_quick_theme(tid))
         menu.exec(self.theme_btn.mapToGlobal(QPoint(0, self.theme_btn.height() + 2)))
@@ -1315,10 +1457,7 @@ class DashboardView(QWidget):
         apply_theme(theme_id)
 
     def _on_theme_changed(self, theme_id: str):
-        if hasattr(self, "theme_btn"):
-            self.theme_btn.setIcon(render_icon("palette", 14, COLOR_ACCENT))
-        if hasattr(self, "brand_sub"):
-            self.brand_sub.setStyleSheet(f"color: {COLOR_ACCENT}; letter-spacing: 1px;")
+        self._apply_dynamic_styles()
         self._update_mode_switcher_styles()
         self.refresh()
 
@@ -1369,17 +1508,22 @@ class DashboardView(QWidget):
                 email = client.get_authenticated_email() or "Connected"
                 short = email.split("@")[0] if "@" in email else email
                 self.gdrive_btn.setText(f"Drive ({short})")
+                is_light = is_current_theme_light()
+                cloud_bg = "#DCFCE7" if is_light else "#162B1D"
+                cloud_border = "#22C55E" if is_light else "#10B981"
+                cloud_fg = "#15803D" if is_light else "#6EE7B7"
+                cloud_hover = "#BBF7D0" if is_light else "#1E3D29"
                 self.gdrive_btn.setStyleSheet(f"""
                     QPushButton {{
                         padding: 0 14px;
-                        background-color: #162B1D;
-                        border: 1px solid #10B981;
+                        background-color: {cloud_bg};
+                        border: 1px solid {cloud_border};
                         border-radius: 3px;
-                        color: #6EE7B7;
+                        color: {cloud_fg};
                         font-weight: 600;
                     }}
                     QPushButton:hover {{
-                        background-color: #1E3D29;
+                        background-color: {cloud_hover};
                     }}
                 """)
             else:

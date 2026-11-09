@@ -1,7 +1,12 @@
 {
-  "version": "1.3.2",
+  "version": "1.3.3",
   "prerelease": false,
   "release_date": "2026-11-06",
-  "download_url": "https://github.com/voiceline-diskrep/Framed/releases/download/v1.3.0/Framed-Setup-v1.3.2.exe",
-  "release_notes": "• Match Pictures Dynamic Quota States: Amber/Yellow when under quota, Emerald Green with Pulse Pop animation when reached, Crimson Red when over quota\n• Floating HUD Toast: Smooth gliding top toast banner notifying target quota reached (e.g. 15/15) without interrupting rapid W/S culling\n• Synchronized Telemetry: Sidebar quota statistics match navbar state colors perfectly"
+  "download_url": "https://github.com/voiceline-diskrep/Framed/releases/download/v1.3.3/Framed-Setup-v1.3.3.exe",
+  "release_notes": [
+    "Dedicated Match Selection export folder (RAW/ and JPEG/) capped strictly at quota limit for immediate sharing",
+    "Fixed Theme dropdown checkmark to follow active theme in real time",
+    "Complete Light theme redesign: eliminated black boxes around labels and made all typography transparent-backed",
+    "Clean dynamic re-skinning across Dark Amber, OLED, Dark Blue, Dark Green, Neutral Gray, and Light themes"
+  ]
 }

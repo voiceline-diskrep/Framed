@@ -823,6 +823,7 @@ class GDriveUploadWorker(QThread):
         include_maybe: bool = True,
         include_unselected: bool = False,
         include_edited: bool = True,
+        include_match_selection: bool = True,
         client: Optional[GoogleDriveClient] = None,
         parent=None
     ):
@@ -834,6 +835,7 @@ class GDriveUploadWorker(QThread):
         self.include_maybe = include_maybe
         self.include_unselected = include_unselected
         self.include_edited = include_edited
+        self.include_match_selection = include_match_selection
         self.client = client or GoogleDriveClient()
         self._is_cancelled = False
 
@@ -882,6 +884,16 @@ class GDriveUploadWorker(QThread):
                         tasks.append((item.raw_path, (cat, "RAW")))
                     if include_jpeg and item.jpeg_path and os.path.exists(item.jpeg_path):
                         tasks.append((item.jpeg_path, (cat, "JPEG")))
+
+                if self.include_match_selection and getattr(self.project, "is_match_mode", False):
+                    quota = getattr(self.project, "max_selected_count", 0)
+                    kept_items = [it for it in self.project.items if it.status in ("kept", "selected")]
+                    match_items = kept_items[:quota] if quota > 0 else kept_items
+                    for item in match_items:
+                        if include_raw and item.raw_path and os.path.exists(item.raw_path):
+                            tasks.append((item.raw_path, ("Match Selection", "RAW")))
+                        if include_jpeg and item.jpeg_path and os.path.exists(item.jpeg_path):
+                            tasks.append((item.jpeg_path, ("Match Selection", "JPEG")))
 
                 if self.include_edited:
                     if self.project.edited_files:
