@@ -919,9 +919,10 @@ class GDriveUploadWorker(QThread):
             # 1. Pre-create root & subfolder hierarchy sequentially so parallel workers have zero folder lock contention
             curr_parent = self.parent_folder_id
             if self.separate_by_workspace:
-                ws_name = sanitize_folder_name(self.project.get_workspace_name())
-                ws_folder = self.client.create_folder(ws_name, curr_parent)
-                curr_parent = ws_folder["id"]
+                ws_parts = [sanitize_folder_name(p) for p in self.project.get_workspace_parts()]
+                for part in ws_parts:
+                    ws_folder = self.client.create_folder(part, curr_parent)
+                    curr_parent = ws_folder["id"]
 
             proj_folder_name = sanitize_folder_name(self.project.name)
             proj_folder = self.client.create_folder(proj_folder_name, curr_parent)

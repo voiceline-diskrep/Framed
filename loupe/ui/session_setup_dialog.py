@@ -583,9 +583,10 @@ class SessionSetupView(QWidget):
 
     def _populate_folders(self):
         self.folder_combo.clear()
-        folders = storage.get_folders()
-        for f in folders:
-            self.folder_combo.addItem(f.name, f.id)
+        folders_with_depth = storage.get_folders_with_depth()
+        for f, depth in folders_with_depth:
+            prefix = "    " * depth + ("└─ " if depth > 0 else "")
+            self.folder_combo.addItem(f"{prefix}{f.name}", f.id)
 
     def _on_format_changed(self, button_id: int):
         self._update_format_visibility()

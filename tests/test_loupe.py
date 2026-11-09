@@ -473,6 +473,63 @@ class TestLoupeWorkstation(unittest.TestCase):
             sm.delete_project(proj.id)
             sm.delete_folder(ws_folder.id)
 
+    def test_nested_workspace_folders(self):
+        """Verify nested workspace folders: parent_id hierarchy, ancestry, depth, paths, and hierarchical export."""
+        sm = StorageManager()
+        parent_f = sm.create_folder("Client Commercials")
+        sub_f = sm.create_folder("Brand Nike", parent_id=parent_f.id)
+        sub_sub_f = sm.create_folder("Campaign 2026", parent_id=sub_f.id)
+
+        try:
+            self.assertEqual(sub_f.parent_id, parent_f.id)
+            self.assertEqual(sub_sub_f.parent_id, sub_f.id)
+
+            # Test hierarchy traversal
+            top_level = sm.get_top_level_folders()
+            self.assertTrue(any(f.id == parent_f.id for f in top_level))
+            self.assertFalse(any(f.id == sub_f.id for f in top_level))
+
+            subfolders = sm.get_subfolders(parent_f.id)
+            self.assertEqual(len(subfolders), 1)
+            self.assertEqual(subfolders[0].id, sub_f.id)
+
+            # Test path and parts
+            parts = sm.get_folder_parts(sub_sub_f.id)
+            self.assertEqual(parts, ["Client Commercials", "Brand Nike", "Campaign 2026"])
+            path_str = sm.get_folder_path(sub_sub_f.id)
+            self.assertEqual(path_str, "Client Commercials / Brand Nike / Campaign 2026")
+
+            # Test depth
+            depth_list = sm.get_folders_with_depth()
+            id_depth_map = {f.id: d for f, d in depth_list}
+            self.assertEqual(id_depth_map.get(parent_f.id), 0)
+            self.assertEqual(id_depth_map.get(sub_f.id), 1)
+            self.assertEqual(id_depth_map.get(sub_sub_f.id), 2)
+
+            # Test nested export
+            j_path = os.path.join(self.sample_shoot_dir, "DSC08491.JPG")
+            item = PhotoItem(base_name="DSC08491", jpeg_path=j_path, primary_path=j_path, status="kept")
+            nested_proj = Project(name="Shoot Day 1", folder_id=sub_sub_f.id, items=[item])
+            sm.save_project(nested_proj)
+
+            dest = os.path.join(self.temp_dir, "export_nested")
+            worker = ExportWorker(nested_proj, dest, separate_by_workspace=True)
+            res = []
+            worker.export_finished.connect(lambda r: res.append(r))
+            worker.run()
+
+            expected_base = os.path.join(dest, "Client Commercials", "Brand Nike", "Campaign 2026", "Shoot Day 1")
+            self.assertEqual(res[0]["base_dir"], expected_base)
+            self.assertTrue(os.path.exists(os.path.join(expected_base, "Selected", "JPEG", "DSC08491.JPG")))
+
+            sm.delete_project(nested_proj.id)
+        finally:
+            sm.delete_folder(parent_f.id)
+            # Verify recursive delete cleaned up descendants
+            self.assertIsNone(sm.get_folder_by_id(parent_f.id))
+            self.assertIsNone(sm.get_folder_by_id(sub_f.id))
+            self.assertIsNone(sm.get_folder_by_id(sub_sub_f.id))
+
     def test_in_app_session_creation_views(self):
         """Verify that SessionSetupView, VideoSessionView, and DashboardModalOverlay render in-app without popouts."""
         from loupe.ui.session_setup_dialog import SessionSetupView
@@ -723,7 +780,7 @@ class TestLoupeWorkstation(unittest.TestCase):
 
         # 3. Test SettingsDialog UI with theme radios
         dlg = SettingsDialog()
-        self.assertEqual(len(dlg.theme_radios), 6)
+        self.assertEqual(len(dlg.theme_radios), len(THEMES))
         self.assertTrue(dlg.theme_radios["dark_green"].isChecked())
         
         # Toggle Neutral Gray via radio

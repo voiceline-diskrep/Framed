@@ -397,8 +397,10 @@ class VideoSessionView(QWidget):
 
     def _populate_folders(self):
         self.combo_folder.clear()
-        for f in storage.get_folders():
-            self.combo_folder.addItem(f.name, f.id)
+        folders_with_depth = storage.get_folders_with_depth()
+        for f, depth in folders_with_depth:
+            prefix = "    " * depth + ("└─ " if depth > 0 else "")
+            self.combo_folder.addItem(f"{prefix}{f.name}", f.id)
 
     def _on_dir_text_changed(self, text: str):
         d = text.strip()

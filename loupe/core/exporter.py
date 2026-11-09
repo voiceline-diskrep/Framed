@@ -33,8 +33,8 @@ class ExportWorker(QThread):
         try:
             proj_folder_name = sanitize_folder_name(self.project.name)
             if self.separate_by_workspace:
-                ws_name = sanitize_folder_name(self.project.get_workspace_name())
-                base_dir = os.path.join(self.destination_root, ws_name, proj_folder_name)
+                ws_parts = [sanitize_folder_name(p) for p in self.project.get_workspace_parts()]
+                base_dir = os.path.join(self.destination_root, *ws_parts, proj_folder_name)
             else:
                 base_dir = os.path.join(self.destination_root, proj_folder_name)
             

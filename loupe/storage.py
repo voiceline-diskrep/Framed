@@ -63,11 +63,64 @@ class StorageManager:
             f = self.folders.get(folder_id)
         return f
 
-    def create_folder(self, name: str) -> Folder:
-        folder = Folder(name=name.strip())
+    def create_folder(self, name: str, parent_id: Optional[str] = None) -> Folder:
+        folder = Folder(name=name.strip(), parent_id=parent_id)
         self.folders[folder.id] = folder
         self.save()
         return folder
+
+    def get_top_level_folders(self) -> List[Folder]:
+        folders = [f for f in self.folders.values() if not f.parent_id or f.parent_id not in self.folders]
+        return sorted(folders, key=lambda f: f.name.lower())
+
+    def get_subfolders(self, parent_id: str) -> List[Folder]:
+        folders = [f for f in self.folders.values() if getattr(f, "parent_id", None) == parent_id]
+        return sorted(folders, key=lambda f: f.name.lower())
+
+    def get_folder_ancestry(self, folder_id: str) -> List[Folder]:
+        """Returns the ancestor chain from root down to this folder."""
+        if folder_id not in self.folders and os.path.exists(self.db_path):
+            self.load()
+        chain = []
+        visited = set()
+        curr_id = folder_id
+        while curr_id and curr_id in self.folders and curr_id not in visited:
+            visited.add(curr_id)
+            f = self.folders[curr_id]
+            chain.append(f)
+            curr_id = getattr(f, "parent_id", None)
+        chain.reverse()
+        return chain
+
+    def get_folder_path(self, folder_id: str) -> str:
+        chain = self.get_folder_ancestry(folder_id)
+        return " / ".join(f.name.strip() for f in chain) if chain else ""
+
+    def get_folder_parts(self, folder_id: str) -> List[str]:
+        chain = self.get_folder_ancestry(folder_id)
+        return [f.name.strip() for f in chain] if chain else []
+
+    def get_folder_descendant_ids(self, folder_id: str) -> List[str]:
+        """Returns all descendant folder IDs recursively."""
+        descendants = []
+        for sub in self.get_subfolders(folder_id):
+            descendants.append(sub.id)
+            descendants.extend(self.get_folder_descendant_ids(sub.id))
+        return descendants
+
+    def get_folders_with_depth(self) -> List[Any]:
+        """Returns flattened list of (folder, depth) ordered hierarchically for trees & dropdowns."""
+        result = []
+        def _walk(parent_id: Optional[str], depth: int):
+            if parent_id is None:
+                subs = self.get_top_level_folders()
+            else:
+                subs = self.get_subfolders(parent_id)
+            for f in subs:
+                result.append((f, depth))
+                _walk(f.id, depth + 1)
+        _walk(None, 0)
+        return result
 
     def rename_folder(self, folder_id: str, new_name: str) -> Optional[Folder]:
         folder = self.folders.get(folder_id)
@@ -76,15 +129,32 @@ class StorageManager:
             self.save()
         return folder
 
+    def update_folder_parent(self, folder_id: str, new_parent_id: Optional[str]) -> bool:
+        folder = self.folders.get(folder_id)
+        if not folder or folder_id == new_parent_id:
+            return False
+        # Prevent circular parenting
+        if new_parent_id and new_parent_id in self.get_folder_descendant_ids(folder_id):
+            return False
+        folder.parent_id = new_parent_id
+        self.save()
+        return True
+
     def delete_folder(self, folder_id: str) -> bool:
         if folder_id in self.folders:
-            # Reassign projects to personal or first available
-            other_folders = [fid for fid in self.folders if fid != folder_id]
+            descendant_ids = set(self.get_folder_descendant_ids(folder_id))
+            all_to_remove = descendant_ids | {folder_id}
+            
+            # Reassign projects to personal or first available outside the deleted tree
+            other_folders = [fid for fid in self.folders if fid not in all_to_remove]
             fallback_id = other_folders[0] if other_folders else "folder_personal"
             for project in self.projects.values():
-                if project.folder_id == folder_id:
+                if project.folder_id in all_to_remove:
                     project.folder_id = fallback_id
-            del self.folders[folder_id]
+
+            for fid in all_to_remove:
+                if fid in self.folders:
+                    del self.folders[fid]
             self.save()
             return True
         return False

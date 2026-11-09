@@ -18,6 +18,32 @@ class ThemeDefinition:
     colors: Dict[str, str]
 
 THEMES: Dict[str, ThemeDefinition] = {
+    "studio_pro": ThemeDefinition(
+        id="studio_pro",
+        name="Studio Pro",
+        description="Apple & Adobe inspired workstation interface with refined charcoal and warm orange accents.",
+        is_light=False,
+        colors={
+            "COLOR_BG_BASE": "#101114",
+            "COLOR_BG_SURFACE": "#15171B",
+            "COLOR_BG_ELEVATED": "#202329",
+            "COLOR_BG_HOVER": "#282C34",
+            "COLOR_BG_ACTIVE": "#323742",
+            "COLOR_BORDER_SUBTLE": "#262930",
+            "COLOR_BORDER_DISTINCT": "#30343C",
+            "COLOR_BORDER_FOCUS": "#F59E0B",
+            "COLOR_TEXT_PRIMARY": "#F4F4F5",
+            "COLOR_TEXT_SECONDARY": "#969BA5",
+            "COLOR_TEXT_MUTED": "#666D79",
+            "COLOR_ACCENT": "#F59E0B",
+            "COLOR_ACCENT_HOVER": "#FBBF24",
+            "COLOR_ACCENT_PRESSED": "#D97706",
+            "COLOR_STATUS_KEPT": "#22C55E",
+            "COLOR_STATUS_REJECTED": "#EF4444",
+            "COLOR_STATUS_MAYBE": "#EAB308",
+            "COLOR_STATUS_PENDING": "#666D79",
+        }
+    ),
     "dark_amber": ThemeDefinition(
         id="dark_amber",
         name="Dark Amber",
@@ -178,6 +204,9 @@ THEMES: Dict[str, ThemeDefinition] = {
 
 # Backward compatibility aliases for previously saved theme names
 THEME_ALIASES: Dict[str, str] = {
+    "default": "studio_pro",
+    "studio": "studio_pro",
+    "pro": "studio_pro",
     "darkroom_amber": "dark_amber",
     "obsidian_cyan": "oled",
     "midnight_sapphire": "dark_blue",
@@ -195,10 +224,10 @@ class ThemeManager(QObject):
 theme_manager = ThemeManager()
 
 # Initialize active theme from config or default
-current_theme_id = config.get("theme", "dark_amber")
+current_theme_id = config.get("theme", "studio_pro")
 current_theme_id = THEME_ALIASES.get(current_theme_id, current_theme_id)
 if current_theme_id not in THEMES:
-    current_theme_id = "dark_amber"
+    current_theme_id = "studio_pro"
 
 _active_colors = THEMES[current_theme_id].colors
 
@@ -227,6 +256,13 @@ COLOR_STATUS_MAYBE = _active_colors["COLOR_STATUS_MAYBE"]
 COLOR_STATUS_PENDING = _active_colors["COLOR_STATUS_PENDING"]
 
 # Fonts loaded dynamically
+# Visual Design System Tokens
+RADIUS_CARD = 10
+RADIUS_MODAL = 14
+RADIUS_BUTTON = 7
+RADIUS_BADGE = 4
+RADIUS_INPUT = 8
+
 _DISPLAY_FONT_FAMILY = "Space Grotesk"
 _BODY_FONT_FAMILY = "Plus Jakarta Sans"
 _MONO_FONT_FAMILY = "IBM Plex Mono"

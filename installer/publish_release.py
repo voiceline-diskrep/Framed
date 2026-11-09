@@ -14,27 +14,26 @@ def get_token():
     raise ValueError("GitHub token not found in git credential manager")
 
 def publish_release(
-    tag: str = "v1.3.3",
+    tag: str = "v1.4.0",
     target_branch: str = "master",
     prerelease: bool = False
 ):
     token = get_token()
     repo = "voiceline-diskrep/Framed"
-    name = "Framed v1.3.3 — Match Selection Export Folder & Theme Engine Redesign"
+    name = "Framed v1.4.0 — Complete Premium UI/UX Redesign & Nested Workspace Folders"
     body = (
-        "## What's Changed in Framed v1.3.2\n\n"
-        "### 📸 Match Pictures Mode (Selection Quota)\n"
-        "* **Selection Quota Limit**: Sets an upper photo selection quota in Session Setup to streamline high-speed turnarounds for sports and live event coverage.\n"
-        "* **Real-Time Quota Badge**: Live status indicator in the review navigation bar: Under Quota (green), At Quota (amber), and Over Quota (red warning capsule).\n"
-        "* **Optical Telemetry Integration**: Live quota card in the review telemetry sidebar with live photo count and quota remaining.\n\n"
-        "### ⚡ Preview Engine & Low-RAM Optimization with Linked RAW\n"
-        "* **Dual Preview Engine**: Choose between full sensor RAW decode or ultra-fast, lightweight JPEG preview on lower-RAM hardware.\n"
-        "* **Link Selections to RAW Originals**: Automatically preserves and pairs original RAW files during selection and export while browsing fast JPEG previews.\n"
-        "* **Dynamic RAM Scaling**: Preloader calculates RAM budget using ~18 MB/photo for JPEG preview vs ~75 MB/photo for RAW decode.\n"
-        "* **Inspect RAW on Demand (`R`)**: Press `R` or click toolbar button during review to temporarily decode full-resolution sensor RAW for critical focus check.\n\n"
-        "### ☁️ Cloud & Workstation Enhancements\n"
-        "* **Google Drive API (OAuth 2.0)**: Cloud import and export with live transfer telemetry.\n"
-        "* **Auto-Updater System**: Automatic background update detection and seamless installer download directly in-app.\n\n"
+        "## What's Changed in Framed v1.4.0\n\n"
+        "### 🎨 Complete Premium UI/UX Visual Redesign\n"
+        "* **New 'Studio Pro' Theme**: Refined Apple & Adobe creative workstation interface (#101114, #15171B, #191C21, #202329, #F59E0B) with warm amber accents, subtle borders, and 10px rounded corners.\n"
+        "* **Top KPI Summary Cards**: 4 live statistics cards (Sessions, Photos, Videos, Completed) featuring custom dynamic bezier sparkline graphs computed in real-time from storage.\n"
+        "* **Instant Search & Status Filter Bar**: Client-side instant session title filtering plus status filter pills (All, Photos, Videos, Completed, In Progress) and view mode switchers.\n"
+        "* **Cover Photo Thumbnails**: Asynchronously loaded 120x80px rounded cover photo previews (first kept/selected photo or shoot hero photo) with camera aperture fallback placeholder.\n"
+        "* **Misty Mountain Sidebar Landscape**: Subtle dark mountain silhouette in the sidebar bottom corner smoothly fading into dark charcoal.\n\n"
+        "### 📁 Nested Workspace Folders\n"
+        "* **Subfolders at Any Depth**: Create and organize nested subfolders inside workspace categories.\n"
+        "* **Collapsible Sidebar Tree**: Native carets (▸/▾) with right-aligned session count badges.\n"
+        "* **Hierarchical Disk & Cloud Sync**: Folder trees are automatically mirrored on disk exports and Google Drive.\n"
+        "* **Breadcrumb Navigation**: Header path display (Projects › Category › Subfolder).\n\n"
         "### 📦 Downloads\n"
         f"* **Windows Installer**: `Framed-Setup-{tag}.exe`\n"
     )

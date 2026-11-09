@@ -446,10 +446,14 @@ class ExportDialog(QDialog):
         else:
             base_indent = ""
 
+        ws_parts = [sanitize_folder_name(p) for p in self.project.get_workspace_parts()]
         if use_ws:
-            lines.append(f"{base_indent}📁 {w_name}/")
-            lines.append(f"{base_indent}   └── 📁 {p_name}/")
-            indent = base_indent + "        "
+            for idx, part in enumerate(ws_parts):
+                indent_ws = base_indent + ("   " * idx)
+                lines.append(f"{indent_ws}📁 {part}/")
+            indent = base_indent + ("   " * len(ws_parts))
+            lines.append(f"{indent}└── 📁 {p_name}/")
+            indent += "    "
         else:
             lines.append(f"{base_indent}📁 {p_name}/")
             indent = base_indent + "   "

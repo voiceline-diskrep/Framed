@@ -44,6 +44,7 @@ class PhotoItem:
 class Folder:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = "Personal"
+    parent_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
@@ -51,7 +52,9 @@ class Folder:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Folder":
-        return cls(**data)
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
 
 
 @dataclass
@@ -151,10 +154,13 @@ class Project:
         return max(0, self.max_selected_count - self.selected_count)
 
     def get_workspace_name(self) -> str:
-        """Returns the human-readable name of the workspace folder this project belongs to."""
+        """Returns the human-readable name of the workspace folder this project belongs to (including parent path if nested)."""
         try:
             from loupe.storage import storage
             if self.folder_id:
+                path = storage.get_folder_path(self.folder_id)
+                if path:
+                    return path
                 folder = storage.get_folder_by_id(self.folder_id)
                 if folder and folder.name.strip():
                     return folder.name.strip()
@@ -168,6 +174,18 @@ class Project:
         except Exception:
             pass
         return "Personal"
+
+    def get_workspace_parts(self) -> List[str]:
+        """Returns the list of folder names in hierarchy order, e.g. ['Commercial', 'Brand Deals']."""
+        try:
+            from loupe.storage import storage
+            if self.folder_id:
+                parts = storage.get_folder_parts(self.folder_id)
+                if parts:
+                    return parts
+        except Exception:
+            pass
+        return ["Personal"]
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)

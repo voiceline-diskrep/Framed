@@ -2,6 +2,7 @@
 
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QPainterPath, QBrush
 from PySide6.QtCore import Qt, QRectF, QPointF
+import math
 
 def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
     """Renders a sharp geometric icon using QPainter."""
@@ -19,7 +20,105 @@ def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
     s = float(size)
     pad = s * 0.15
 
-    if name == "plus":
+    if name == "brand_frame":
+        # Signature FRAMED orange logo: corner brackets forming a camera frame
+        cl = s * 0.35
+        # Top-left bracket
+        painter.drawLine(QPointF(pad, pad + cl), QPointF(pad, pad))
+        painter.drawLine(QPointF(pad, pad), QPointF(pad + cl, pad))
+        # Bottom-right bracket
+        painter.drawLine(QPointF(s - pad - cl, s - pad), QPointF(s - pad, s - pad))
+        painter.drawLine(QPointF(s - pad, s - pad), QPointF(s - pad, s - pad - cl))
+
+    elif name in ("photo", "image"):
+        rect = QRectF(pad, pad, s - pad * 2, s - pad * 2)
+        painter.drawRect(rect)
+        painter.drawEllipse(QPointF(pad + s * 0.22, pad + s * 0.22), 1.5, 1.5)
+        path = QPainterPath()
+        path.moveTo(pad, s - pad)
+        path.lineTo(pad + s * 0.25, s * 0.52)
+        path.lineTo(pad + s * 0.45, s * 0.65)
+        path.lineTo(pad + s * 0.65, s * 0.45)
+        path.lineTo(s - pad, s - pad)
+        painter.drawPath(path)
+
+    elif name in ("video", "film"):
+        rect = QRectF(pad, pad + 1, s - pad * 2, s - pad * 2 - 2)
+        painter.drawRect(rect)
+        path = QPainterPath()
+        path.moveTo(s * 0.42, s * 0.36)
+        path.lineTo(s * 0.64, s * 0.50)
+        path.lineTo(s * 0.42, s * 0.64)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    elif name in ("check_circle", "completed"):
+        painter.drawEllipse(QRectF(pad, pad, s - pad * 2, s - pad * 2))
+        path = QPainterPath()
+        path.moveTo(s * 0.32, s * 0.52)
+        path.lineTo(s * 0.46, s * 0.66)
+        path.lineTo(s * 0.70, s * 0.38)
+        painter.drawPath(path)
+
+    elif name == "calendar":
+        rect = QRectF(pad, pad + 2, s - pad * 2, s - pad * 2 - 2)
+        painter.drawRect(rect)
+        painter.drawLine(QPointF(pad, pad + 6), QPointF(s - pad, pad + 6))
+        painter.drawLine(QPointF(pad + 4, pad), QPointF(pad + 4, pad + 2))
+        painter.drawLine(QPointF(s - pad - 4, pad), QPointF(s - pad - 4, pad + 2))
+
+    elif name in ("trash", "delete"):
+        painter.drawLine(QPointF(pad + 2, pad + 3), QPointF(s - pad - 2, pad + 3))
+        painter.drawLine(QPointF(s * 0.4, pad + 1), QPointF(s * 0.6, pad + 1))
+        path = QPainterPath()
+        path.moveTo(pad + 3, pad + 4)
+        path.lineTo(pad + 4.5, s - pad)
+        path.lineTo(s - pad - 4.5, s - pad)
+        path.lineTo(s - pad - 3, pad + 4)
+        painter.drawPath(path)
+        painter.drawLine(QPointF(s * 0.44, pad + 6), QPointF(s * 0.44, s - pad - 2))
+        painter.drawLine(QPointF(s * 0.56, pad + 6), QPointF(s * 0.56, s - pad - 2))
+
+    elif name == "home":
+        path = QPainterPath()
+        path.moveTo(pad, s * 0.52)
+        path.lineTo(s / 2, pad)
+        path.lineTo(s - pad, s * 0.52)
+        painter.drawPath(path)
+        rect = QRectF(pad + 2, s * 0.52, s - (pad + 2) * 2, s * 0.48 - pad)
+        painter.drawRect(rect)
+
+    elif name == "aperture":
+        r = (s - pad * 2) / 2.0
+        cx, cy = s / 2.0, s / 2.0
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+        for i in range(6):
+            angle = i * (2 * math.pi / 6)
+            x1 = cx + r * math.cos(angle)
+            y1 = cy + r * math.sin(angle)
+            angle2 = (i + 1.8) * (2 * math.pi / 6)
+            x2 = cx + (r * 0.45) * math.cos(angle2)
+            y2 = cy + (r * 0.45) * math.sin(angle2)
+            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+    elif name == "grid":
+        hs = (s - pad * 2 - 2) / 2
+        painter.drawRect(QRectF(pad, pad, hs, hs))
+        painter.drawRect(QRectF(pad + hs + 2, pad, hs, hs))
+        painter.drawRect(QRectF(pad, pad + hs + 2, hs, hs))
+        painter.drawRect(QRectF(pad + hs + 2, pad + hs + 2, hs, hs))
+
+    elif name == "list":
+        painter.drawLine(QPointF(pad, pad + 2), QPointF(s - pad, pad + 2))
+        painter.drawLine(QPointF(pad, s / 2), QPointF(s - pad, s / 2))
+        painter.drawLine(QPointF(pad, s - pad - 2), QPointF(s - pad, s - pad - 2))
+
+    elif name == "compact":
+        for i in range(4):
+            y = pad + i * ((s - pad * 2) / 3)
+            painter.drawLine(QPointF(pad, y), QPointF(s - pad, y))
+
+    elif name == "plus":
         painter.drawLine(QPointF(s / 2, pad), QPointF(s / 2, s - pad))
         painter.drawLine(QPointF(pad, s / 2), QPointF(s - pad, s / 2))
 
