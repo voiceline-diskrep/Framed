@@ -20,7 +20,7 @@ from PySide6.QtGui import (
 from ..models import GalleryPhoto, GalleryFolder, SmartAlbum
 from ..storage import storage, format_bytes
 from ..core.gallery_engine import (
-    thumbnail_cache, MissingFileRecoveryEngine, RawToJpegConverter
+    thumbnail_cache, ThumbnailBatchWorker, MissingFileRecoveryEngine, RawToJpegConverter
 )
 from .icons import render_icon
 from .gallery_dialogs import (
@@ -109,6 +109,13 @@ class QuickFeatureBannerCard(QFrame):
         self.setFixedHeight(108)
         self.setMinimumWidth(148)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def apply_ready_thumbnail(self):
+        pix, is_final = thumbnail_cache.get_cached_or_placeholder_pixmap(self.photo, 220, 152, radius=0)
+        if is_final:
+            self.thumb_pix = pix
+            self.needs_async_thumb = False
+            self.update()
 
     def enterEvent(self, event):
         self.hovered = True
@@ -386,10 +393,15 @@ class GalleryPhotoCard(QFrame):
         self.setFixedSize(218, 198)
         self.setCursor(Qt.PointingHandCursor)
 
-        # Load cached thumbnail
+        # Load cached thumbnail non-blockingly (<1ms if on disk, placeholder otherwise)
         self.thumb_pix = QPixmap()
+        self.needs_async_thumb = False
         if not photo.is_missing:
-            self.thumb_pix = thumbnail_cache.get_thumbnail_pixmap(photo, 220, 152, radius=0)
+            pix, is_final = thumbnail_cache.get_cached_or_placeholder_pixmap(photo, 220, 152, radius=0)
+            if is_final:
+                self.thumb_pix = pix
+            else:
+                self.needs_async_thumb = True
 
     def enterEvent(self, event):
         self.hovered = True
@@ -589,8 +601,11 @@ class GalleryView(QWidget):
             if f.name == "School Pictures":
                 self.expanded_parent_folders.add(f.id)
 
+        self._is_loaded: bool = False
+        self._active_cards: Dict[str, GalleryPhotoCard] = {}
+        self._thumb_worker: Optional[ThumbnailBatchWorker] = None
+        self.page_limit: int = 80
         self._setup_ui()
-        self.refresh_all()
 
     def _setup_ui(self):
         self.setStyleSheet("""
@@ -1659,13 +1674,21 @@ class GalleryView(QWidget):
         self.grid_v.addWidget(box)
 
     def _render_grid_view(self, photos: List[GalleryPhoto], compact: bool = False):
+        if self._thumb_worker and self._thumb_worker.isRunning():
+            self._thumb_worker.cancel()
+            self._thumb_worker.wait(200)
+        self._active_cards.clear()
+
         grid_w = QWidget()
         grid = QGridLayout(grid_w)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(10 if not compact else 6)
 
+        visible_photos = photos[:self.page_limit]
+        uncached_photos: List[GalleryPhoto] = []
+
         cols = 4 if not compact else 5
-        for idx, photo in enumerate(photos):
+        for idx, photo in enumerate(visible_photos):
             card = GalleryPhotoCard(photo, is_selected=(photo.id in self.selected_photo_ids))
             if compact:
                 card.setFixedSize(172, 162)
@@ -1674,8 +1697,37 @@ class GalleryView(QWidget):
             card.context_action.connect(self._on_card_context_action)
             card.selection_toggled.connect(self._on_card_selection_toggled)
             grid.addWidget(card, idx // cols, idx % cols)
+            self._active_cards[photo.id] = card
+            if card.needs_async_thumb:
+                uncached_photos.append(photo)
 
         self.grid_v.addWidget(grid_w)
+
+        if len(photos) > self.page_limit:
+            rem = len(photos) - self.page_limit
+            btn_more = QPushButton(f"Load More Photographs ({rem:,} remaining)")
+            btn_more.setCursor(Qt.PointingHandCursor)
+            btn_more.setStyleSheet(
+                "QPushButton { background-color: #1C2028; color: #F59E0B; border: 1px solid #F59E0B; "
+                "border-radius: 8px; padding: 9px 18px; font-size: 12px; font-weight: 700; }"
+                "QPushButton:hover { background-color: #F59E0B; color: #0D0E11; }"
+            )
+            btn_more.clicked.connect(self._load_more_photos)
+            self.grid_v.addWidget(btn_more)
+
+        if uncached_photos:
+            self._thumb_worker = ThumbnailBatchWorker(uncached_photos, self)
+            self._thumb_worker.thumb_ready.connect(self._on_async_thumb_ready)
+            self._thumb_worker.start()
+
+    def _load_more_photos(self):
+        self.page_limit += 80
+        self.refresh_browser()
+
+    def _on_async_thumb_ready(self, photo_id: str, _thumb_path: str):
+        card = self._active_cards.get(photo_id)
+        if card:
+            card.apply_ready_thumbnail()
 
     def _render_list_view(self, photos: List[GalleryPhoto]):
         for photo in photos:

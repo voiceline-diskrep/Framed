@@ -135,11 +135,10 @@ class PreloadManager(QObject):
         self._worker.photo_loaded.connect(self._on_photo_loaded)
         self._worker.progress_update.connect(self._on_progress_update)
         self._worker.batch_done.connect(self._on_batch_done)
-        self._worker.start()
 
     def cleanup(self):
         self.session_generation += 1
-        if self._worker:
+        if self._worker and self._worker.isRunning():
             self._worker.stop()
         self._cache.clear()
         self.loaded_batches.clear()

@@ -111,12 +111,99 @@ def hamming_distance_hex(hash1: str, hash2: str) -> int:
         return 64
 
 
+class ThumbnailBatchWorker(QThread):
+    """Background worker that generates persistent 480px disk thumbnails without blocking the UI thread."""
+    thumb_ready = Signal(str, str)  # (photo_id, thumb_filepath)
+
+    def __init__(self, photos: List[GalleryPhoto], parent=None):
+        super().__init__(parent)
+        self.photos = list(photos)
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        for photo in self.photos:
+            if self._cancelled:
+                break
+            path = photo.active_path
+            if not path or not os.path.exists(path):
+                continue
+            thumb_file = photo.thumbnail_path or os.path.join(storage.gallery_thumbs_dir, f"{photo.id}.jpg")
+            if os.path.exists(thumb_file):
+                if not photo.thumbnail_path:
+                    photo.thumbnail_path = thumb_file
+                self.thumb_ready.emit(photo.id, thumb_file)
+                continue
+            try:
+                ext = os.path.splitext(path)[1].lower()
+                qimg = None
+                if ext not in RAW_EXTENSIONS:
+                    reader = QImageReader(path)
+                    reader.setAutoTransform(True)
+                    # Decode at scaled size directly for instant JPEG/PNG thumbnailing
+                    orig_sz = reader.size()
+                    if orig_sz.isValid() and (orig_sz.width() > 480 or orig_sz.height() > 480):
+                        reader.setScaledSize(orig_sz.scaled(480, 480, Qt.KeepAspectRatio))
+                    qimg = reader.read()
+                else:
+                    # Fast embedded JPEG preview extraction for RAW files first
+                    try:
+                        import rawpy
+                        with rawpy.imread(path) as raw:
+                            thumb = raw.extract_thumb()
+                            if thumb.format == rawpy.ThumbFormat.JPEG:
+                                qimg = QImage.fromData(thumb.data)
+                    except Exception:
+                        qimg = None
+                    if not qimg or qimg.isNull():
+                        qimg, _ = ImageDecoder.decode_to_qimage(path)
+
+                if qimg and not qimg.isNull():
+                    preview_scaled = qimg.scaled(480, 480, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    os.makedirs(storage.gallery_thumbs_dir, exist_ok=True)
+                    preview_scaled.save(thumb_file, "JPG", 85)
+                    photo.thumbnail_path = thumb_file
+                    self.thumb_ready.emit(photo.id, thumb_file)
+            except Exception:
+                pass
+
+
 class GalleryThumbnailCache:
     """Generates and caches Gallery photo thumbnails without loading full-res images into memory simultaneously."""
 
     @staticmethod
     def clear_memory_cache():
         _GALLERY_PIXMAP_CACHE.clear()
+
+    @classmethod
+    def get_cached_or_placeholder_pixmap(cls, photo: GalleryPhoto, width: int = 240, height: int = 150, radius: int = 8) -> Tuple[QPixmap, bool]:
+        """Non-blocking thumbnail lookup: returns (pixmap, is_final).
+        If disk thumbnail already exists, loads it in <1ms. Otherwise returns a sleek placeholder immediately."""
+        cache_key = f"{photo.id}_{width}_{height}_{radius}_{photo.is_missing}"
+        if cache_key in _GALLERY_PIXMAP_CACHE:
+            return _GALLERY_PIXMAP_CACHE[cache_key], True
+
+        thumb_file = photo.thumbnail_path or os.path.join(storage.gallery_thumbs_dir, f"{photo.id}.jpg")
+        if os.path.exists(thumb_file):
+            reader = QImageReader(thumb_file)
+            qimg = reader.read()
+            if qimg and not qimg.isNull():
+                if not photo.thumbnail_path:
+                    photo.thumbnail_path = thumb_file
+                scaled = qimg.scaled(width, height, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                x_off = max(0, (scaled.width() - width) // 2)
+                y_off = max(0, (scaled.height() - height) // 2)
+                cropped = scaled.copy(x_off, y_off, width, height)
+                rounded = QPixmap.fromImage(cropped)
+                _GALLERY_PIXMAP_CACHE[cache_key] = rounded
+                return rounded, True
+
+        # Return placeholder without caching as final so background worker can upgrade it
+        placeholder = QPixmap(width, height)
+        placeholder.fill(QColor("#14171D"))
+        return placeholder, False
 
     @classmethod
     def get_thumbnail_pixmap(cls, photo: GalleryPhoto, width: int = 240, height: int = 150, radius: int = 8) -> QPixmap:

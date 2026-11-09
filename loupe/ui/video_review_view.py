@@ -36,15 +36,20 @@ class VideoReviewView(QWidget):
         self.proxy_queue: Optional[VideoProxyQueue] = None
         self.undo_stack: list = []
 
-        self._init_player()
+        self.player: Optional[QMediaPlayer] = None
+        self.audio_output: Optional[QAudioOutput] = None
         self._init_ui()
         self.setFocusPolicy(Qt.StrongFocus)
 
-    def _init_player(self):
+    def _ensure_player(self):
+        if self.player is not None:
+            return
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.8)
+        if hasattr(self, "video_widget"):
+            self.player.setVideoOutput(self.video_widget)
 
         self.player.positionChanged.connect(self._on_player_position_changed)
         self.player.durationChanged.connect(self._on_player_duration_changed)
@@ -131,7 +136,8 @@ class VideoReviewView(QWidget):
         # Video Surface Widget
         self.video_widget = QVideoWidget()
         self.video_widget.setStyleSheet(f"background-color: {COLOR_BG_BASE}; border: 1px solid {COLOR_BORDER_DISTINCT}; border-radius: 2px;")
-        self.player.setVideoOutput(self.video_widget)
+        if self.player:
+            self.player.setVideoOutput(self.video_widget)
         player_layout.addWidget(self.video_widget, stretch=1)
 
         # Floating Video Controls Bar
@@ -159,7 +165,7 @@ class VideoReviewView(QWidget):
         self.slider_timeline = QSlider(Qt.Horizontal)
         self.slider_timeline.setRange(0, 1000)
         self.slider_timeline.sliderMoved.connect(self._on_seek_slider_moved)
-        self.slider_timeline.sliderPressed.connect(lambda: self.player.pause())
+        self.slider_timeline.sliderPressed.connect(lambda: self.player.pause() if self.player else None)
         c_layout.addWidget(self.slider_timeline, stretch=1)
 
         # Timestamp Label
@@ -357,7 +363,8 @@ class VideoReviewView(QWidget):
 
     def unload_project(self):
         """Cleanly unload active video session, stop playback, and reset UI readouts."""
-        self.player.stop()
+        if self.player:
+            self.player.stop()
         if self.proxy_queue:
             self.proxy_queue.cancel()
             self.proxy_queue = None
@@ -379,6 +386,7 @@ class VideoReviewView(QWidget):
 
     def load_project(self, project: Project):
         """Load a video project session without preloading into RAM."""
+        self._ensure_player()
         self.unload_project()
 
         self.project = project
@@ -418,6 +426,7 @@ class VideoReviewView(QWidget):
     def _display_current_clip(self):
         if not self.current_item:
             return
+        self._ensure_player()
 
         total = len(self.project.items)
         curr = self.project.current_index + 1
@@ -487,13 +496,15 @@ class VideoReviewView(QWidget):
         dlg = FinishSessionDialog(self.project, self)
         if dlg.exec() == QDialog.Accepted:
             if dlg.choice == FinishSessionDialog.FINISH_NOW:
-                self.player.stop()
+                if self.player:
+                    self.player.stop()
                 if self.proxy_queue:
                     self.proxy_queue.cancel()
                 storage.save_project(self.project)
                 self.back_to_dashboard.emit()
             elif dlg.choice == FinishSessionDialog.FINISH_AND_EXPORT:
-                self.player.stop()
+                if self.player:
+                    self.player.stop()
                 if self.proxy_queue:
                     self.proxy_queue.cancel()
                 storage.save_project(self.project)
@@ -509,9 +520,10 @@ class VideoReviewView(QWidget):
                 self.proxy_queue = VideoProxyQueue(self.project.id, self.project.items, self)
                 self.proxy_queue.clip_proxy_ready.connect(self._on_clip_proxy_ready)
                 self.proxy_queue.start()
-        curr_pos = self.player.position()
+        curr_pos = self.player.position() if self.player else 0
         self._display_current_clip()
-        self.player.setPosition(curr_pos)
+        if self.player:
+            self.player.setPosition(curr_pos)
 
     def _on_clip_proxy_ready(self, item_id: str, proxy_path: str):
         if self.current_item and self.current_item.id == item_id:
@@ -519,7 +531,7 @@ class VideoReviewView(QWidget):
                 proxy_mb = os.path.getsize(proxy_path) / (1024 * 1024)
                 self.lbl_proxy_size.setText(f"Proxy Size: {proxy_mb:.1f} MB")
             # Do not interrupt active video playback mid-stream
-            if not self.view_uncompressed and self.player.playbackState() != QMediaPlayer.PlayingState:
+            if not self.view_uncompressed and self.player and self.player.playbackState() != QMediaPlayer.PlayingState:
                 curr_pos = self.player.position()
                 self._display_current_clip()
                 self.player.setPosition(curr_pos)
@@ -569,6 +581,8 @@ class VideoReviewView(QWidget):
             self._navigate_to_index(self.project.current_index + 1)
 
     def _toggle_playback(self):
+        if not self.player:
+            return
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
         else:
@@ -605,6 +619,8 @@ class VideoReviewView(QWidget):
         self._on_player_position_changed(self.player.position())
 
     def _on_seek_slider_moved(self, value: int):
+        if not self.player:
+            return
         dur = self.player.duration()
         if dur > 0:
             target_ms = int((value / 1000.0) * dur)
@@ -649,10 +665,12 @@ class VideoReviewView(QWidget):
             self._confirm_exit_to_dashboard()
             event.accept()
         elif key == Qt.Key_Left:
-            self.player.setPosition(max(0, self.player.position() - 5000))
+            if self.player:
+                self.player.setPosition(max(0, self.player.position() - 5000))
             event.accept()
         elif key == Qt.Key_Right:
-            self.player.setPosition(min(self.player.duration(), self.player.position() + 5000))
+            if self.player:
+                self.player.setPosition(min(self.player.duration(), self.player.position() + 5000))
             event.accept()
         elif key == Qt.Key_F11:
             win = self.window()

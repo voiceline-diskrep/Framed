@@ -5,7 +5,7 @@ import os
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QStackedWidget, QWidget, QMessageBox, QDialog
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QIcon
 
 from loupe.config import config
@@ -215,6 +215,33 @@ class FramedMainWindow(QMainWindow):
             self.showMaximized()
         else:
             self.showFullScreen()
+
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, "gallery_view") and self.gallery_view._thumb_worker:
+                self.gallery_view._thumb_worker.cancel()
+                self.gallery_view._thumb_worker.wait(300)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "review_view"):
+                self.review_view.unload_project()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "video_review_view"):
+                self.video_review_view.unload_project()
+                if hasattr(self.video_review_view, "player"):
+                    self.video_review_view.player.stop()
+                    self.video_review_view.player.setSource(QUrl())
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "bg_update_worker") and self.bg_update_worker and self.bg_update_worker.isRunning():
+                self.bg_update_worker.wait(500)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F11:
