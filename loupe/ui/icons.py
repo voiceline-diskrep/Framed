@@ -68,16 +68,25 @@ def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
         painter.drawLine(QPointF(s - pad - 4, pad), QPointF(s - pad - 4, pad + 2))
 
     elif name in ("trash", "delete"):
-        painter.drawLine(QPointF(pad + 2, pad + 3), QPointF(s - pad - 2, pad + 3))
-        painter.drawLine(QPointF(s * 0.4, pad + 1), QPointF(s * 0.6, pad + 1))
-        path = QPainterPath()
-        path.moveTo(pad + 3, pad + 4)
-        path.lineTo(pad + 4.5, s - pad)
-        path.lineTo(s - pad - 4.5, s - pad)
-        path.lineTo(s - pad - 3, pad + 4)
-        painter.drawPath(path)
-        painter.drawLine(QPointF(s * 0.44, pad + 6), QPointF(s * 0.44, s - pad - 2))
-        painter.drawLine(QPointF(s * 0.56, pad + 6), QPointF(s * 0.56, s - pad - 2))
+        # Razor-sharp, clean modern trash can
+        t_pen = QPen(color, 1.25, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(t_pen)
+        # Lid
+        painter.drawLine(QPointF(pad, pad + 2.5), QPointF(s - pad, pad + 2.5))
+        # Top handle
+        painter.drawLine(QPointF(s * 0.36, pad + 1.0), QPointF(s * 0.64, pad + 1.0))
+        painter.drawLine(QPointF(s * 0.36, pad + 1.0), QPointF(s * 0.36, pad + 2.5))
+        painter.drawLine(QPointF(s * 0.64, pad + 1.0), QPointF(s * 0.64, pad + 2.5))
+        # Can body
+        body = QPainterPath()
+        body.moveTo(pad + 1.5, pad + 3.5)
+        body.lineTo(pad + 2.5, s - pad)
+        body.lineTo(s - pad - 2.5, s - pad)
+        body.lineTo(s - pad - 1.5, pad + 3.5)
+        painter.drawPath(body)
+        # 2 vertical ribs
+        painter.drawLine(QPointF(s * 0.42, pad + 5.0), QPointF(s * 0.42, s - pad - 2.0))
+        painter.drawLine(QPointF(s * 0.58, pad + 5.0), QPointF(s * 0.58, s - pad - 2.0))
 
     elif name == "home":
         path = QPainterPath()

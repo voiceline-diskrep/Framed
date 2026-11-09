@@ -680,9 +680,14 @@ class GDriveAuthWorker(QThread):
     """Background worker for interactive OAuth 2.0 browser sign-in."""
     auth_finished = Signal(bool, str, str)  # (success, email, error_message)
 
-    def __init__(self, client: Optional[GoogleDriveClient] = None, parent=None):
+    def __init__(self, client: Optional[Any] = None, parent=None):
         super().__init__(parent)
-        self.client = client or GoogleDriveClient()
+        if isinstance(client, GoogleDriveClient):
+            self.client = client
+        elif hasattr(client, "client") and isinstance(client.client, GoogleDriveClient):
+            self.client = client.client
+        else:
+            self.client = GoogleDriveClient()
 
     def cancel(self):
         self.client.cancel_auth()

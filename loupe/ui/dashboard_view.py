@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QScrollArea, QFrame, QInputDialog,
     QMessageBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
     QLineEdit, QComboBox, QMenu, QTreeWidget, QTreeWidgetItem,
-    QHeaderView, QGraphicsDropShadowEffect
+    QHeaderView, QGraphicsDropShadowEffect, QStyledItemDelegate,
+    QStyle, QGridLayout, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QDate, QSize, QPoint, QRectF, QPointF
 from PySide6.QtGui import (
@@ -40,7 +41,8 @@ _COVER_CACHE: Dict[str, QPixmap] = {}
 
 
 def get_session_cover_pixmap(project: Project, width: int = 120, height: int = 80) -> QPixmap:
-    """Returns a smoothly scaled, rounded 120x80 cover photo thumbnail for a session, with fallback placeholder."""
+    """Returns a smoothly scaled, rounded cover photo thumbnail for a session, with fallback placeholder.
+    Guarantees 100% full cover without letterbox black borders across portrait and landscape orientations."""
     cache_key = f"{project.id}_{width}_{height}"
     if cache_key in _COVER_CACHE:
         return _COVER_CACHE[cache_key]
@@ -67,33 +69,26 @@ def get_session_cover_pixmap(project: Project, width: int = 120, height: int = 8
         try:
             reader = QImageReader(hero_path)
             reader.setAutoTransform(True)
-            orig_size = reader.size()
-            if orig_size.isValid() and orig_size.width() > 0:
-                scaled_h = height
-                scaled_w = int(orig_size.width() * (height / orig_size.height()))
-                if scaled_w < width:
-                    scaled_w = width
-                    scaled_h = int(orig_size.height() * (width / orig_size.width()))
-                reader.setScaledSize(QSize(scaled_w, scaled_h))
-                qimg = reader.read()
-                if not qimg.isNull():
-                    x_off = max(0, (qimg.width() - width) // 2)
-                    y_off = max(0, (qimg.height() - height) // 2)
-                    cropped = qimg.copy(x_off, y_off, width, height)
+            qimg = reader.read()
+            if not qimg.isNull():
+                scaled = qimg.scaled(width, height, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                x_off = max(0, (scaled.width() - width) // 2)
+                y_off = max(0, (scaled.height() - height) // 2)
+                cropped = scaled.copy(x_off, y_off, width, height)
 
-                    rounded = QPixmap(width, height)
-                    rounded.fill(Qt.transparent)
-                    painter = QPainter(rounded)
-                    painter.setRenderHint(QPainter.Antialiasing, True)
-                    path = QPainterPath()
-                    path.addRoundedRect(0, 0, width, height, 8, 8)
-                    painter.setClipPath(path)
-                    painter.drawImage(0, 0, cropped)
-                    # Subtle inner border
-                    painter.setPen(QPen(QColor(255, 255, 255, 25), 1))
-                    painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
-                    painter.end()
-                    pixmap = rounded
+                rounded = QPixmap(width, height)
+                rounded.fill(Qt.transparent)
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                path = QPainterPath()
+                path.addRoundedRect(0, 0, width, height, 8, 8)
+                painter.setClipPath(path)
+                painter.drawImage(0, 0, cropped)
+                # Subtle inner border
+                painter.setPen(QPen(QColor(255, 255, 255, 25), 1))
+                painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
+                painter.end()
+                pixmap = rounded
         except Exception:
             pixmap = None
 
@@ -112,9 +107,10 @@ def get_session_cover_pixmap(project: Project, width: int = 120, height: int = 8
         painter.fillPath(path, grad)
 
         # Aperture icon centered
-        ap_icon = render_icon("aperture", 30, COLOR_ACCENT)
-        icon_pix = ap_icon.pixmap(30, 30)
-        painter.drawPixmap((width - 30) // 2, (height - 30) // 2, icon_pix)
+        icon_size = min(30, min(width, height) - 6)
+        ap_icon = render_icon("aperture", icon_size, COLOR_ACCENT)
+        icon_pix = ap_icon.pixmap(icon_size, icon_size)
+        painter.drawPixmap((width - icon_size) // 2, (height - icon_size) // 2, icon_pix)
 
         painter.setPen(QPen(QColor(COLOR_BORDER_DISTINCT), 1))
         painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
@@ -181,8 +177,24 @@ def make_sparkline_pixmap(color_hex: str, points: list, width: int = 90, height:
     return pixmap
 
 
+class FolderTreeDelegate(QStyledItemDelegate):
+    """Custom delegate for the workspace folder tree to paint the active accent pill ONLY on column 0,
+    completely preventing duplicate vertical accent borders from rendering on column 1 count badges."""
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if (option.state & QStyle.State_Selected) and index.column() == 0:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(COLOR_ACCENT))
+            r = option.rect
+            painter.drawRoundedRect(r.x(), r.y() + 4, 3, r.height() - 8, 1.5, 1.5)
+            painter.restore()
+
+
 class SidebarWidget(QFrame):
-    """Left sidebar widget featuring custom painted misty mountain artwork fading into dark charcoal."""
+    """Left sidebar widget featuring high-contrast alpine mountain artwork with moonlight rim lighting."""
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -191,55 +203,92 @@ class SidebarWidget(QFrame):
         w = float(self.width())
         h = float(self.height())
 
-        # Render subtle, elegant misty mountain silhouette in the bottom corner
-        mountain_h = min(220.0, h * 0.32)
+        # Render dramatic, clearly visible mountain silhouette in the bottom corner
+        mountain_h = min(310.0, h * 0.45)
         base_y = h - mountain_h
 
-        # Layer 1: Distant misty peaks
+        # Layer 1: Distant alpine peaks
         path1 = QPainterPath()
         path1.moveTo(0, h)
-        path1.lineTo(0, base_y + 45)
-        path1.lineTo(w * 0.22, base_y + 15)
-        path1.lineTo(w * 0.52, base_y + 48)
-        path1.lineTo(w * 0.82, base_y + 18)
-        path1.lineTo(w, base_y + 36)
+        path1.lineTo(0, base_y + 60)
+        path1.lineTo(w * 0.18, base_y + 20)
+        path1.lineTo(w * 0.35, base_y + 45)
+        path1.lineTo(w * 0.58, base_y + 5)
+        path1.lineTo(w * 0.76, base_y + 35)
+        path1.lineTo(w, base_y + 25)
         path1.lineTo(w, h)
         path1.closeSubpath()
 
         grad1 = QLinearGradient(0, base_y, 0, h)
-        grad1.setColorAt(0, QColor(36, 42, 52, 25))
-        grad1.setColorAt(0.6, QColor(22, 26, 32, 50))
-        grad1.setColorAt(1.0, QColor(16, 18, 22, 80))
+        grad1.setColorAt(0, QColor(58, 72, 92, 160))
+        grad1.setColorAt(0.5, QColor(32, 40, 52, 200))
+        grad1.setColorAt(1.0, QColor(18, 22, 28, 240))
         painter.fillPath(path1, grad1)
 
-        # Layer 2: Near rugged mountain ridge
+        # Moonlight rim light on layer 1
+        pen1 = QPen(QColor(180, 205, 235, 120), 1.2)
+        painter.setPen(pen1)
+        painter.drawLine(QPointF(0, base_y + 60), QPointF(w * 0.18, base_y + 20))
+        painter.drawLine(QPointF(w * 0.18, base_y + 20), QPointF(w * 0.35, base_y + 45))
+        painter.drawLine(QPointF(w * 0.35, base_y + 45), QPointF(w * 0.58, base_y + 5))
+        painter.drawLine(QPointF(w * 0.58, base_y + 5), QPointF(w * 0.76, base_y + 35))
+        painter.drawLine(QPointF(w * 0.76, base_y + 35), QPointF(w, base_y + 25))
+
+        # Layer 2: Mid crags
         path2 = QPainterPath()
         path2.moveTo(0, h)
-        path2.lineTo(0, base_y + 90)
-        path2.lineTo(w * 0.16, base_y + 55)
-        path2.lineTo(w * 0.38, base_y + 78)
-        path2.lineTo(w * 0.62, base_y + 42)
-        path2.lineTo(w * 0.84, base_y + 70)
-        path2.lineTo(w, base_y + 50)
+        path2.lineTo(0, base_y + 110)
+        path2.lineTo(w * 0.28, base_y + 65)
+        path2.lineTo(w * 0.48, base_y + 95)
+        path2.lineTo(w * 0.82, base_y + 48)
+        path2.lineTo(w, base_y + 75)
         path2.lineTo(w, h)
         path2.closeSubpath()
 
-        grad2 = QLinearGradient(0, base_y + 40, 0, h)
-        grad2.setColorAt(0, QColor(20, 24, 30, 40))
-        grad2.setColorAt(1.0, QColor(12, 14, 18, 95))
+        grad2 = QLinearGradient(0, base_y + 50, 0, h)
+        grad2.setColorAt(0, QColor(42, 52, 66, 210))
+        grad2.setColorAt(0.7, QColor(24, 28, 36, 240))
+        grad2.setColorAt(1.0, QColor(14, 16, 20, 255))
         painter.fillPath(path2, grad2)
+
+        pen2 = QPen(QColor(150, 175, 205, 90), 1.0)
+        painter.setPen(pen2)
+        painter.drawLine(QPointF(0, base_y + 110), QPointF(w * 0.28, base_y + 65))
+        painter.drawLine(QPointF(w * 0.28, base_y + 65), QPointF(w * 0.48, base_y + 95))
+        painter.drawLine(QPointF(w * 0.48, base_y + 95), QPointF(w * 0.82, base_y + 48))
+        painter.drawLine(QPointF(w * 0.82, base_y + 48), QPointF(w, base_y + 75))
+
+        # Layer 3: Near rugged ridge
+        path3 = QPainterPath()
+        path3.moveTo(0, h)
+        path3.lineTo(0, base_y + 160)
+        path3.lineTo(w * 0.42, base_y + 115)
+        path3.lineTo(w * 0.70, base_y + 145)
+        path3.lineTo(w, base_y + 120)
+        path3.lineTo(w, h)
+        path3.closeSubpath()
+
+        grad3 = QLinearGradient(0, base_y + 100, 0, h)
+        grad3.setColorAt(0, QColor(28, 34, 44, 245))
+        grad3.setColorAt(1.0, QColor(10, 12, 16, 255))
+        painter.fillPath(path3, grad3)
+
+        pen3 = QPen(QColor(130, 150, 180, 60), 0.8)
+        painter.setPen(pen3)
+        painter.drawLine(QPointF(0, base_y + 160), QPointF(w * 0.42, base_y + 115))
+        painter.drawLine(QPointF(w * 0.42, base_y + 115), QPointF(w * 0.70, base_y + 145))
+        painter.drawLine(QPointF(w * 0.70, base_y + 145), QPointF(w, base_y + 120))
         painter.end()
 
 
 class KPICardWidget(QFrame):
-    """Refined 10px rounded KPI summary card with live counter, icon, and dynamic sparkline."""
+    """Clean, spacious 10px rounded KPI summary card with live counter, elevated icon box, and crisp typography."""
 
-    def __init__(self, title: str, count_str: str, icon_name: str, color_hex: str, spark_data: list, parent=None):
+    def __init__(self, title: str, count_str: str, icon_name: str, color_hex: str, spark_data: Optional[list] = None, parent=None):
         super().__init__(parent)
         self.color_hex = color_hex
-        self.spark_data = spark_data
         self.setObjectName("kpiCardFrame")
-        self.setMinimumHeight(76)
+        self.setMinimumHeight(74)
         self.setStyleSheet(f"""
             QFrame#kpiCardFrame {{
                 background-color: {COLOR_BG_SURFACE};
@@ -254,12 +303,12 @@ class KPICardWidget(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(14)
 
         # Left: Icon inside rounded square
         icon_box = QLabel()
-        icon_box.setFixedSize(36, 36)
+        icon_box.setFixedSize(38, 38)
         icon_box.setStyleSheet(f"""
             background-color: {COLOR_BG_ELEVATED};
             border: 1px solid {COLOR_BORDER_SUBTLE};
@@ -271,34 +320,24 @@ class KPICardWidget(QFrame):
 
         # Middle: Big Count + Label
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
+        text_layout.setSpacing(1)
         text_layout.setAlignment(Qt.AlignVCenter)
 
         self.count_lbl = QLabel(count_str)
-        self.count_lbl.setFont(get_display_font(20, bold=True))
+        self.count_lbl.setFont(get_display_font(22, bold=True))
         self.count_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; background: transparent;")
         text_layout.addWidget(self.count_lbl)
 
         self.title_lbl = QLabel(title)
-        self.title_lbl.setFont(get_body_font(11))
+        self.title_lbl.setFont(get_body_font(12))
         self.title_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; background: transparent;")
         text_layout.addWidget(self.title_lbl)
 
         layout.addLayout(text_layout)
         layout.addStretch()
 
-        # Right: Sparkline
-        self.spark_lbl = QLabel()
-        self.spark_lbl.setFixedSize(90, 36)
-        self.spark_lbl.setStyleSheet("background: transparent;")
-        self.spark_lbl.setPixmap(make_sparkline_pixmap(color_hex, spark_data, 90, 36))
-        layout.addWidget(self.spark_lbl)
-
     def set_data(self, count_str: str, spark_data: Optional[list] = None):
         self.count_lbl.setText(count_str)
-        if spark_data is not None:
-            self.spark_data = spark_data
-            self.spark_lbl.setPixmap(make_sparkline_pixmap(self.color_hex, self.spark_data, 90, 36))
 
 
 class DashboardKPICards(QWidget):
@@ -965,7 +1004,7 @@ class DashboardModalOverlay(QWidget):
 
 
 class ProjectCard(QFrame):
-    """Premium compact project card with real cover thumbnail preview, metadata badges, and smooth hover glow."""
+    """Workstation project card supporting List, Grid, and Compact layout modes with real cover photo previews."""
     resume_clicked = Signal(str)  # project_id
     export_clicked = Signal(str)  # project_id
     delete_clicked = Signal(str)  # project_id
@@ -975,10 +1014,307 @@ class ProjectCard(QFrame):
     edit_folder_requested = Signal(object) # Project
     edit_date_requested = Signal(object) # Project
 
-    def __init__(self, project: Project, parent=None):
+    def __init__(self, project: Project, view_mode: str = "list", parent=None):
         super().__init__(parent)
         self.project = project
+        self.view_mode = view_mode
         self.setObjectName("projectCardFrame")
+
+        if view_mode == "compact":
+            self._init_compact_ui()
+        elif view_mode == "grid":
+            self._init_grid_ui()
+        else:
+            self._init_list_ui()
+
+    def _init_compact_ui(self):
+        self.setStyleSheet(f"""
+            QFrame#projectCardFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 6px;
+            }}
+            QFrame#projectCardFrame:hover {{
+                border-color: {COLOR_ACCENT};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+            QFrame#projectCardFrame QLabel {{
+                background-color: transparent;
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
+            }}
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setSpacing(10)
+
+        # Mini thumbnail
+        thumb = QLabel()
+        thumb.setFixedSize(28, 28)
+        thumb.setStyleSheet("border-radius: 4px;")
+        thumb.setPixmap(get_session_cover_pixmap(self.project, 28, 28))
+        layout.addWidget(thumb)
+
+        # Name
+        name_lbl = QLabel(self.project.name)
+        name_lbl.setFont(get_body_font(12, bold=True))
+        name_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        layout.addWidget(name_lbl)
+
+        # Type badge
+        is_vid = getattr(self.project, "media_type", "photo") == "video"
+        type_badge = QLabel("VIDEO" if is_vid else "PHOTO")
+        type_badge.setFont(get_mono_font(9, bold=True))
+        t_color = "#F59E0B" if is_vid else "#22C55E"
+        t_bg = "#2D2214" if is_vid else "#142E1F"
+        type_badge.setStyleSheet(f"color: {t_color}; background-color: {t_bg}; padding: 1px 6px; border-radius: 3px;")
+        layout.addWidget(type_badge)
+
+        # Folder
+        folder_lbl = QLabel(self.project.get_workspace_name())
+        folder_lbl.setFont(get_mono_font(11))
+        folder_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(folder_lbl)
+
+        # Date
+        date_lbl = QLabel(self.project.shoot_date)
+        date_lbl.setFont(get_body_font(11))
+        date_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        layout.addWidget(date_lbl)
+
+        # Count
+        count_lbl = QLabel(f"{self.project.total_count} items")
+        count_lbl.setFont(get_mono_font(11))
+        count_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(count_lbl)
+
+        # Status
+        status_text = self.project.status_label
+        s_color = COLOR_STATUS_KEPT if "Completed" in status_text else (COLOR_ACCENT if "Progress" in status_text else COLOR_TEXT_MUTED)
+        s_bg = "#142E1F" if "Completed" in status_text else ("#2D2214" if "Progress" in status_text else COLOR_BG_BASE)
+        status_badge = QLabel(status_text)
+        status_badge.setFont(get_mono_font(10, bold=True))
+        status_badge.setStyleSheet(f"color: {s_color}; background-color: {s_bg}; padding: 1px 6px; border-radius: 3px;")
+        layout.addWidget(status_badge)
+
+        layout.addStretch()
+
+        # Resume button
+        btn_text = "Resume Video" if is_vid else "Resume"
+        icon_name = "arrow_right" if is_vid else "loupe"
+        res_btn = QPushButton(f" {btn_text}")
+        res_btn.setIcon(render_icon(icon_name, 11, COLOR_ACCENT))
+        res_btn.setFont(get_body_font(11, bold=True))
+        res_btn.setMinimumHeight(26)
+        res_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT};
+                border-radius: 4px;
+                padding: 0 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_ACCENT};
+                color: #FFFFFF;
+            }}
+        """)
+        res_btn.clicked.connect(lambda checked=False, pid=self.project.id: self.resume_clicked.emit(pid))
+        layout.addWidget(res_btn)
+
+        # Export button
+        exp_btn = QPushButton()
+        exp_btn.setIcon(render_icon("export", 11, COLOR_TEXT_PRIMARY))
+        exp_btn.setToolTip("Export Session")
+        exp_btn.setFixedSize(26, 26)
+        exp_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_BG_HOVER};
+                border-color: {COLOR_TEXT_SECONDARY};
+            }}
+        """)
+        exp_btn.clicked.connect(lambda checked=False, pid=self.project.id: self.export_clicked.emit(pid))
+        layout.addWidget(exp_btn)
+
+        # Delete button
+        del_btn = QPushButton()
+        del_btn.setIcon(render_icon("trash", 11, COLOR_STATUS_REJECTED))
+        del_btn.setToolTip("Delete Session")
+        del_btn.setFixedSize(26, 26)
+        del_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: #3F1D1D;
+                border-color: {COLOR_STATUS_REJECTED};
+            }}
+        """)
+        del_btn.clicked.connect(lambda checked=False, pid=self.project.id: self.delete_clicked.emit(pid))
+        layout.addWidget(del_btn)
+
+    def _init_grid_ui(self):
+        self.setStyleSheet(f"""
+            QFrame#projectCardFrame {{
+                background-color: {COLOR_BG_SURFACE};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 10px;
+                padding: 0px;
+            }}
+            QFrame#projectCardFrame:hover {{
+                border-color: {COLOR_ACCENT};
+                background-color: {COLOR_BG_ELEVATED};
+            }}
+            QFrame#projectCardFrame QLabel {{
+                background-color: transparent;
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
+            }}
+        """)
+        self.setMinimumWidth(240)
+        self.setMaximumWidth(360)
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(10, 10, 10, 10)
+        card_layout.setSpacing(8)
+
+        # Top: 240x130 Cover Thumbnail
+        thumb = QLabel()
+        thumb.setMinimumHeight(130)
+        thumb.setMaximumHeight(160)
+        thumb.setAlignment(Qt.AlignCenter)
+        thumb.setStyleSheet("border-radius: 8px;")
+        thumb.setPixmap(get_session_cover_pixmap(self.project, 260, 140))
+        card_layout.addWidget(thumb)
+
+        # Title & Type Row
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        name_lbl = QLabel(self.project.name)
+        name_lbl.setFont(get_display_font(14, bold=True))
+        name_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        title_row.addWidget(name_lbl)
+
+        is_vid = getattr(self.project, "media_type", "photo") == "video"
+        type_badge = QLabel("VIDEO" if is_vid else "PHOTO")
+        type_badge.setFont(get_mono_font(9, bold=True))
+        t_color = "#F59E0B" if is_vid else "#22C55E"
+        t_bg = "#2D2214" if is_vid else "#142E1F"
+        type_badge.setStyleSheet(f"color: {t_color}; background-color: {t_bg}; padding: 2px 6px; border-radius: 4px;")
+        title_row.addWidget(type_badge)
+        title_row.addStretch()
+        card_layout.addLayout(title_row)
+
+        # Folder & Date Row
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(10)
+        f_lbl = QLabel(f"📁 {self.project.get_workspace_name()}")
+        f_lbl.setFont(get_mono_font(11))
+        f_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        meta_row.addWidget(f_lbl)
+
+        d_lbl = QLabel(f"📅 {self.project.shoot_date}")
+        d_lbl.setFont(get_body_font(11))
+        d_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        meta_row.addWidget(d_lbl)
+        meta_row.addStretch()
+        card_layout.addLayout(meta_row)
+
+        # Status & Count Row
+        status_row = QHBoxLayout()
+        status_row.setSpacing(8)
+        status_text = self.project.status_label
+        s_color = COLOR_STATUS_KEPT if "Completed" in status_text else (COLOR_ACCENT if "Progress" in status_text else COLOR_TEXT_MUTED)
+        s_bg = "#142E1F" if "Completed" in status_text else ("#2D2214" if "Progress" in status_text else COLOR_BG_BASE)
+        s_badge = QLabel(status_text)
+        s_badge.setFont(get_mono_font(10, bold=True))
+        s_badge.setStyleSheet(f"color: {s_color}; background-color: {s_bg}; padding: 2px 6px; border-radius: 4px;")
+        status_row.addWidget(s_badge)
+
+        cnt_lbl = QLabel(f"{self.project.total_count} items")
+        cnt_lbl.setFont(get_mono_font(11))
+        cnt_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        status_row.addWidget(cnt_lbl)
+        status_row.addStretch()
+        card_layout.addLayout(status_row)
+
+        card_layout.addSpacing(4)
+
+        # Action Buttons
+        btn_text = "Resume Video Sort" if is_vid else "Resume Culling"
+        icon_name = "arrow_right" if is_vid else "loupe"
+        res_btn = QPushButton(f" {btn_text}")
+        res_btn.setIcon(render_icon(icon_name, 11, COLOR_ACCENT))
+        res_btn.setFont(get_body_font(11, bold=True))
+        res_btn.setMinimumHeight(30)
+        res_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT};
+                border-radius: 6px;
+                padding: 0 12px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_ACCENT};
+                color: #FFFFFF;
+            }}
+        """)
+        res_btn.clicked.connect(lambda checked=False, pid=self.project.id: self.resume_clicked.emit(pid))
+        card_layout.addWidget(res_btn)
+
+        act_row = QHBoxLayout()
+        act_row.setSpacing(6)
+        exp_btn = QPushButton(" Export")
+        exp_btn.setIcon(render_icon("export", 11, COLOR_TEXT_PRIMARY))
+        exp_btn.setFont(get_body_font(11))
+        exp_btn.setMinimumHeight(28)
+        exp_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 6px;
+                padding: 0 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_BG_HOVER};
+                border-color: {COLOR_TEXT_SECONDARY};
+            }}
+        """)
+        exp_btn.clicked.connect(lambda checked=False, pid=self.project.id: self.export_clicked.emit(pid))
+        act_row.addWidget(exp_btn, stretch=1)
+
+        del_btn = QPushButton()
+        del_btn.setIcon(render_icon("trash", 11, COLOR_STATUS_REJECTED))
+        del_btn.setToolTip("Delete Session")
+        del_btn.setFixedSize(28, 28)
+        del_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: #3F1D1D;
+                border-color: {COLOR_STATUS_REJECTED};
+            }}
+        """)
+        del_btn.clicked.connect(lambda checked=False, pid=self.project.id: self.delete_clicked.emit(pid))
+        act_row.addWidget(del_btn)
+        card_layout.addLayout(act_row)
+
+    def _init_list_ui(self):
+        project = self.project
         self.setStyleSheet(f"""
             QFrame#projectCardFrame {{
                 background-color: {COLOR_BG_SURFACE};
@@ -992,6 +1328,9 @@ class ProjectCard(QFrame):
             }}
             QFrame#projectCardFrame QLabel {{
                 background-color: transparent;
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
             }}
         """)
 
@@ -1380,6 +1719,7 @@ class DashboardView(QWidget):
         self.current_media_mode: str = "photo"  # "photo" or "video"
         self.search_query: str = ""
         self.active_status_filter: str = "All"  # All, Photos, Videos, Completed, In Progress
+        self.current_view_mode: str = "list"  # "list", "grid", or "compact"
         self._init_ui()
         self.modal_overlay = DashboardModalOverlay(self)
         self.refresh()
@@ -1575,6 +1915,7 @@ class DashboardView(QWidget):
         self.folder_tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         self.folder_tree.itemClicked.connect(self._on_tree_item_clicked)
         self.folder_list = self.folder_tree  # alias for backward compatibility
+        self.folder_tree.setItemDelegate(FolderTreeDelegate(self.folder_tree))
         self.folder_tree.setStyleSheet(self._get_tree_style())
         sidebar_layout.addWidget(self.folder_tree, stretch=1)
 
@@ -1638,10 +1979,10 @@ class DashboardView(QWidget):
         self.kpi_cards = DashboardKPICards()
         right_layout.addWidget(self.kpi_cards)
 
-        # Right Header (Folder Title, Subtitle, Search Field, Filter Pills)
-        right_header = QHBoxLayout()
-        right_header.setSpacing(14)
-        right_header.setAlignment(Qt.AlignVCenter)
+        # Row 1: Folder Title, Subtitle, and Folder Action Buttons
+        title_row = QHBoxLayout()
+        title_row.setSpacing(14)
+        title_row.setAlignment(Qt.AlignVCenter)
 
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
@@ -1654,15 +1995,71 @@ class DashboardView(QWidget):
         self.folder_desc_lbl.setFont(get_body_font(12))
         self.folder_desc_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         title_box.addWidget(self.folder_desc_lbl)
-        right_header.addLayout(title_box)
+        title_row.addLayout(title_box)
 
-        right_header.addStretch()
+        title_row.addStretch()
+
+        # Header subfolder / edit folder buttons
+        self.header_add_subfolder_btn = QPushButton("+ Subfolder")
+        self.header_add_subfolder_btn.setIcon(render_icon("plus", 11, COLOR_ACCENT))
+        self.header_add_subfolder_btn.setFont(get_body_font(11))
+        self.header_add_subfolder_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 5px 14px;
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_BORDER_SUBTLE};
+                background-color: transparent;
+                border-radius: 6px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_ACCENT};
+                background-color: {COLOR_BG_HOVER};
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
+            }}
+        """)
+        self.header_add_subfolder_btn.clicked.connect(lambda: self._create_new_subfolder())
+        self.header_add_subfolder_btn.setVisible(False)
+        title_row.addWidget(self.header_add_subfolder_btn)
+
+        self.header_edit_folder_btn = QPushButton("Edit Folder")
+        self.header_edit_folder_btn.setIcon(render_icon("edit", 11, COLOR_ACCENT))
+        self.header_edit_folder_btn.setFont(get_body_font(11))
+        self.header_edit_folder_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 5px 14px;
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_BORDER_SUBTLE};
+                background-color: transparent;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_ACCENT};
+                background-color: {COLOR_BG_HOVER};
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
+            }}
+        """)
+        self.header_edit_folder_btn.clicked.connect(self._rename_selected_folder)
+        self.header_edit_folder_btn.setVisible(False)
+        title_row.addWidget(self.header_edit_folder_btn)
+
+        right_layout.addLayout(title_row)
+
+        # Row 2: Search, Filter Pills, and View Switcher Toolbar
+        toolbar_row = QHBoxLayout()
+        toolbar_row.setSpacing(12)
+        toolbar_row.setAlignment(Qt.AlignVCenter)
 
         # Real-time search field
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search sessions...")
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setMinimumWidth(210)
+        self.search_edit.setMinimumWidth(200)
+        self.search_edit.setMaximumWidth(320)
         self.search_edit.setMinimumHeight(34)
         self.search_edit.setFont(get_body_font(12))
         self.search_edit.setStyleSheet(f"""
@@ -1678,7 +2075,9 @@ class DashboardView(QWidget):
             }}
         """)
         self.search_edit.textChanged.connect(self._on_search_text_changed)
-        right_header.addWidget(self.search_edit)
+        toolbar_row.addWidget(self.search_edit)
+
+        toolbar_row.addStretch()
 
         # Status filter pills
         self.filter_pills_frame = QFrame()
@@ -1687,6 +2086,9 @@ class DashboardView(QWidget):
                 background-color: {COLOR_BG_SURFACE};
                 border: 1px solid {COLOR_BORDER_DISTINCT};
                 border-radius: 8px;
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
             }}
         """)
         fp_layout = QHBoxLayout(self.filter_pills_frame)
@@ -1702,8 +2104,17 @@ class DashboardView(QWidget):
             fp_layout.addWidget(btn)
             self.filter_buttons[f_name] = btn
 
-        right_header.addWidget(self.filter_pills_frame)
+        toolbar_row.addWidget(self.filter_pills_frame)
         self._update_filter_pill_styles()
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShadow(QFrame.Plain)
+        sep.setFixedWidth(1)
+        sep.setFixedHeight(20)
+        sep.setStyleSheet(f"background-color: {COLOR_BORDER_DISTINCT}; border: none;")
+        toolbar_row.addWidget(sep)
 
         # View Mode switcher buttons (Grid, List, Compact)
         self.view_switcher_frame = QFrame()
@@ -1712,6 +2123,9 @@ class DashboardView(QWidget):
                 background-color: {COLOR_BG_SURFACE};
                 border: 1px solid {COLOR_BORDER_DISTINCT};
                 border-radius: 8px;
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
             }}
         """)
         vs_layout = QHBoxLayout(self.view_switcher_frame)
@@ -1723,66 +2137,27 @@ class DashboardView(QWidget):
         self.btn_view_grid.setFixedSize(28, 28)
         self.btn_view_grid.setToolTip("Grid View")
         self.btn_view_grid.setStyleSheet("border: none; border-radius: 5px;")
+        self.btn_view_grid.clicked.connect(lambda: self._set_view_mode("grid"))
         vs_layout.addWidget(self.btn_view_grid)
 
         self.btn_view_list = QPushButton()
         self.btn_view_list.setIcon(render_icon("list", 13, COLOR_ACCENT))
         self.btn_view_list.setFixedSize(28, 28)
-        self.btn_view_list.setToolTip("Compact List View (Active)")
+        self.btn_view_list.setToolTip("List View")
         self.btn_view_list.setStyleSheet(f"border: 1px solid {COLOR_ACCENT}; background: {COLOR_BG_ACTIVE}; border-radius: 5px;")
+        self.btn_view_list.clicked.connect(lambda: self._set_view_mode("list"))
         vs_layout.addWidget(self.btn_view_list)
 
         self.btn_view_compact = QPushButton()
         self.btn_view_compact.setIcon(render_icon("compact", 13, COLOR_TEXT_MUTED))
         self.btn_view_compact.setFixedSize(28, 28)
-        self.btn_view_compact.setToolTip("Ultra Compact View")
+        self.btn_view_compact.setToolTip("Compact Table View")
         self.btn_view_compact.setStyleSheet("border: none; border-radius: 5px;")
+        self.btn_view_compact.clicked.connect(lambda: self._set_view_mode("compact"))
         vs_layout.addWidget(self.btn_view_compact)
 
-        right_header.addWidget(self.view_switcher_frame)
-
-        # Header subfolder / edit folder buttons
-        self.header_add_subfolder_btn = QPushButton("+ Subfolder")
-        self.header_add_subfolder_btn.setIcon(render_icon("plus", 11, COLOR_ACCENT))
-        self.header_add_subfolder_btn.setFont(get_body_font(11))
-        self.header_add_subfolder_btn.setStyleSheet(f"""
-            QPushButton {{
-                padding: 4px 12px;
-                color: {COLOR_ACCENT};
-                border: 1px solid {COLOR_BORDER_SUBTLE};
-                background-color: transparent;
-                border-radius: 6px;
-            }}
-            QPushButton:hover {{
-                border-color: {COLOR_ACCENT};
-                background-color: {COLOR_BG_HOVER};
-            }}
-        """)
-        self.header_add_subfolder_btn.clicked.connect(lambda: self._create_new_subfolder())
-        self.header_add_subfolder_btn.setVisible(False)
-        right_header.addWidget(self.header_add_subfolder_btn)
-
-        self.header_edit_folder_btn = QPushButton("Edit Folder")
-        self.header_edit_folder_btn.setIcon(render_icon("edit", 11, COLOR_ACCENT))
-        self.header_edit_folder_btn.setFont(get_body_font(11))
-        self.header_edit_folder_btn.setStyleSheet(f"""
-            QPushButton {{
-                padding: 4px 12px;
-                color: {COLOR_ACCENT};
-                border: 1px solid {COLOR_BORDER_SUBTLE};
-                background-color: transparent;
-                border-radius: 6px;
-            }}
-            QPushButton:hover {{
-                border-color: {COLOR_ACCENT};
-                background-color: {COLOR_BG_HOVER};
-            }}
-        """)
-        self.header_edit_folder_btn.clicked.connect(self._rename_selected_folder)
-        self.header_edit_folder_btn.setVisible(False)
-        right_header.addWidget(self.header_edit_folder_btn)
-
-        right_layout.addLayout(right_header)
+        toolbar_row.addWidget(self.view_switcher_frame)
+        right_layout.addLayout(toolbar_row)
 
         # Scrollable projects container
         self.scroll_area = QScrollArea()
@@ -1851,7 +2226,6 @@ class DashboardView(QWidget):
             }}
             QTreeWidget::item:selected {{
                 background-color: {COLOR_BG_ELEVATED};
-                border-left: 3px solid {COLOR_ACCENT};
                 font-weight: 600;
                 color: {COLOR_TEXT_PRIMARY};
             }}
@@ -2183,7 +2557,17 @@ class DashboardView(QWidget):
         while self.projects_layout.count():
             child = self.projects_layout.takeAt(0)
             if child.widget():
-                child.widget().deleteLater()
+                w = child.widget()
+                w.setParent(None)
+                w.deleteLater()
+            elif child.layout():
+                sub_l = child.layout()
+                while sub_l.count():
+                    sc = sub_l.takeAt(0)
+                    if sc.widget():
+                        sw = sc.widget()
+                        sw.setParent(None)
+                        sw.deleteLater()
 
         mode = self.current_media_mode
         if self.selected_folder_id:
@@ -2277,17 +2661,56 @@ class DashboardView(QWidget):
 
             self.projects_layout.addWidget(empty_box)
         else:
-            for proj in projects:
-                card = ProjectCard(proj)
-                card.resume_clicked.connect(self.open_project_requested.emit)
-                card.export_clicked.connect(self.export_project_requested.emit)
-                card.delete_clicked.connect(self._on_delete_project)
-                card.date_changed.connect(self._on_project_date_changed)
-                card.refresh_requested.connect(self.refresh)
-                card.edit_requested.connect(self._on_edit_project_modal)
-                card.edit_folder_requested.connect(self._on_edit_folder_modal)
-                card.edit_date_requested.connect(self._on_edit_date_modal)
-                self.projects_layout.addWidget(card)
+            if self.current_view_mode == "grid":
+                grid_widget = QWidget()
+                grid_layout = QGridLayout(grid_widget)
+                grid_layout.setContentsMargins(0, 0, 0, 0)
+                grid_layout.setSpacing(14)
+                grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+
+                cols = 3
+                for i, proj in enumerate(projects):
+                    card = ProjectCard(proj, view_mode="grid")
+                    self._connect_card_signals(card)
+                    grid_layout.addWidget(card, i // cols, i % cols)
+
+                self.projects_layout.addWidget(grid_widget)
+            else:
+                spacing = 4 if self.current_view_mode == "compact" else 12
+                self.projects_layout.setSpacing(spacing)
+                for proj in projects:
+                    card = ProjectCard(proj, view_mode=self.current_view_mode)
+                    self._connect_card_signals(card)
+                    self.projects_layout.addWidget(card)
+
+    def _connect_card_signals(self, card: ProjectCard):
+        card.resume_clicked.connect(self.open_project_requested.emit)
+        card.export_clicked.connect(self.export_project_requested.emit)
+        card.delete_clicked.connect(self._on_delete_project)
+        card.date_changed.connect(self._on_project_date_changed)
+        card.refresh_requested.connect(self.refresh)
+        card.edit_requested.connect(self._on_edit_project_modal)
+        card.edit_folder_requested.connect(self._on_edit_folder_modal)
+        card.edit_date_requested.connect(self._on_edit_date_modal)
+
+    def _set_view_mode(self, mode: str):
+        if self.current_view_mode != mode:
+            self.current_view_mode = mode
+            self._update_view_mode_styles()
+            self._load_projects_for_selection()
+
+    def _update_view_mode_styles(self):
+        active_style = f"border: 1px solid {COLOR_ACCENT}; background: {COLOR_BG_ACTIVE}; border-radius: 5px;"
+        inactive_style = "border: none; background: transparent; border-radius: 5px;"
+
+        self.btn_view_grid.setStyleSheet(active_style if self.current_view_mode == 'grid' else inactive_style)
+        self.btn_view_grid.setIcon(render_icon('grid', 13, COLOR_ACCENT if self.current_view_mode == 'grid' else COLOR_TEXT_MUTED))
+
+        self.btn_view_list.setStyleSheet(active_style if self.current_view_mode == 'list' else inactive_style)
+        self.btn_view_list.setIcon(render_icon('list', 13, COLOR_ACCENT if self.current_view_mode == 'list' else COLOR_TEXT_MUTED))
+
+        self.btn_view_compact.setStyleSheet(active_style if self.current_view_mode == 'compact' else inactive_style)
+        self.btn_view_compact.setIcon(render_icon('compact', 13, COLOR_ACCENT if self.current_view_mode == 'compact' else COLOR_TEXT_MUTED))
 
     def _on_edit_project_modal(self, proj: Project):
         def _saved(name, folder_id, shoot_date):

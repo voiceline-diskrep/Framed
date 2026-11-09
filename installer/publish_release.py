@@ -14,13 +14,13 @@ def get_token():
     raise ValueError("GitHub token not found in git credential manager")
 
 def publish_release(
-    tag: str = "v1.4.0",
+    tag: str = "v1.4.1",
     target_branch: str = "master",
     prerelease: bool = False
 ):
     token = get_token()
     repo = "voiceline-diskrep/Framed"
-    name = "Framed v1.4.0 — Complete Premium UI/UX Redesign & Nested Workspace Folders"
+    name = "Framed v1.4.1 — Multi-Layout Switcher, AFK Preloading & UI Refinements"
     body = (
         "## What's Changed in Framed v1.4.0\n\n"
         "### 🎨 Complete Premium UI/UX Visual Redesign\n"

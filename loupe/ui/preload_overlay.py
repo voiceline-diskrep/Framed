@@ -13,6 +13,8 @@ from loupe.ui.icons import render_icon
 
 class PreloadOverlay(QWidget):
     """In-app pause overlay displayed when navigating beyond currently preloaded buffer."""
+    afk_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setVisible(False)
@@ -107,6 +109,35 @@ class PreloadOverlay(QWidget):
         t_layout.addWidget(self.file_lbl)
 
         layout.addWidget(telemetry_frame)
+
+        # AFK Mode Action Row
+        afk_row = QHBoxLayout()
+        afk_row.setSpacing(10)
+        self.btn_afk = QPushButton("  AFK Mode (Minimize & Notify When Done)")
+        self.btn_afk.setIcon(render_icon("settings", 12, COLOR_ACCENT))
+        self.btn_afk.setFont(get_body_font(11, bold=True))
+        self.btn_afk.setMinimumHeight(32)
+        self.btn_afk.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT};
+                border-radius: 6px;
+                padding: 0 16px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_ACCENT};
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                padding-top: 2px;
+            }}
+        """)
+        self.btn_afk.clicked.connect(self._on_afk_clicked)
+        afk_row.addWidget(self.btn_afk)
+        layout.addLayout(afk_row)
+
         outer_layout.addWidget(self.card)
 
     def set_batch_info(self, start_idx: int, end_idx: int, target_idx: int, total_items: Optional[int] = None):
@@ -138,6 +169,11 @@ class PreloadOverlay(QWidget):
         else:
             eta_str = "ETA: Finishing..."
         self.eta_lbl.setText(eta_str)
+
+    def _on_afk_clicked(self):
+        self.btn_afk.setText("✓ AFK Mode Active — You will be notified when ready")
+        self.btn_afk.setEnabled(False)
+        self.afk_requested.emit()
 
         if filename:
             self.file_lbl.setText(f"Decoded: {filename} ({completed}/{total})")

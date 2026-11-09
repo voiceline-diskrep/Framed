@@ -661,7 +661,7 @@ class GDriveSignInPromptDialog(QDialog):
         self.btn_signin.setEnabled(False)
         self.status_lbl.setText("Waiting for Google Sign-In in your default web browser...")
         self.status_lbl.setStyleSheet(f"color: {COLOR_ACCENT};")
-        self.auth_worker = GDriveAuthWorker(self)
+        self.auth_worker = GDriveAuthWorker(self.client, self)
         self.auth_worker.auth_finished.connect(self._on_auth_finished)
         self.auth_worker.start()
 
@@ -682,7 +682,7 @@ class GDriveManagerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Google Drive & Workstation Features")
-        self.setFixedSize(560, 480)
+        self.resize(620, 580)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
         self.client = GoogleDriveClient()
         self.auth_worker = None
@@ -784,6 +784,7 @@ class GDriveManagerDialog(QDialog):
             "• <b>Match Pictures Mode</b>: Quota limits in New Session with live over-quota warning HUD.<br>"
             "• <b>Low-RAM JPEG Preview</b>: Lightweight browsing with linked RAWs and 'R' key inspection."
         )
+        bullets.setWordWrap(True)
         bullets.setFont(get_body_font(11))
         bullets.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; line-height: 1.4;")
         feat_layout.addWidget(bullets)
@@ -879,7 +880,7 @@ class GDriveManagerDialog(QDialog):
             from loupe.core.gdrive import GDriveAuthWorker
             self.btn_acc_action.setEnabled(False)
             self.lbl_acc_status.setText("Waiting for browser sign-in...")
-            self.auth_worker = GDriveAuthWorker(self)
+            self.auth_worker = GDriveAuthWorker(self.client, self)
             self.auth_worker.auth_finished.connect(self._on_auth_finished)
             self.auth_worker.start()
 

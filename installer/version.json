@@ -1,8 +1,8 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "prerelease": false,
   "release_date": "2026-11-06",
-  "download_url": "https://github.com/voiceline-diskrep/Framed/releases/download/v1.4.0/Framed-Setup-v1.4.0.exe",
+  "download_url": "https://github.com/voiceline-diskrep/Framed/releases/download/v1.4.1/Framed-Setup-v1.4.1.exe",
   "release_notes": [
     "Dedicated Match Selection export folder (RAW/ and JPEG/) capped strictly at quota limit for immediate sharing",
     "Fixed Theme dropdown checkmark to follow active theme in real time",

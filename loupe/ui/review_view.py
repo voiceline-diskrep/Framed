@@ -196,6 +196,8 @@ class ReviewView(QWidget):
         self.preload_manager.batch_completed.connect(self._on_preload_batch_completed)
 
         self.preload_overlay = PreloadOverlay(self)
+        self.preload_overlay.afk_requested.connect(self._on_afk_requested)
+        self.is_afk_mode = False
         self.is_preloading_paused = False
         self.target_nav_index: Optional[int] = None
         self.undo_stack: List[tuple] = []  # (index, old_status)
@@ -508,10 +510,28 @@ class ReviewView(QWidget):
         if self.is_preloading_paused:
             self.preload_overlay.update_progress(completed, total, speed, eta, fname)
 
+    def _on_afk_requested(self):
+        self.is_afk_mode = True
+        w = self.window()
+        if w:
+            w.showMinimized()
+
     def _on_preload_batch_completed(self, batch_id: int):
         if self.is_preloading_paused:
             self.is_preloading_paused = False
             self.preload_overlay.hide()
+            if getattr(self, "is_afk_mode", False):
+                self.is_afk_mode = False
+                w = self.window()
+                if w:
+                    w.showNormal()
+                    w.activateWindow()
+                    w.raise_()
+                try:
+                    import winsound
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                except Exception:
+                    pass
             if self.target_nav_index is not None and self.project:
                 self.project.current_index = self.target_nav_index
                 self.target_nav_index = None
