@@ -1712,6 +1712,7 @@ class DashboardView(QWidget):
     open_settings_requested = Signal()
     fullscreen_requested = Signal()
     media_mode_changed = Signal(str)      # "photo" or "video"
+    gallery_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1793,6 +1794,12 @@ class DashboardView(QWidget):
         self.btn_mode_video.setFont(get_mono_font(11, bold=True))
         self.btn_mode_video.clicked.connect(lambda: self._set_media_mode("video"))
         ms_layout.addWidget(self.btn_mode_video)
+
+        self.btn_mode_gallery = QPushButton(" Gallery")
+        self.btn_mode_gallery.setIcon(render_icon("gallery", 13, COLOR_TEXT_MUTED))
+        self.btn_mode_gallery.setFont(get_mono_font(11, bold=True))
+        self.btn_mode_gallery.clicked.connect(self.gallery_requested.emit)
+        ms_layout.addWidget(self.btn_mode_gallery)
 
         header_layout.addWidget(self.mode_switcher_frame)
         self._update_mode_switcher_styles()
@@ -2309,6 +2316,9 @@ class DashboardView(QWidget):
             self.btn_mode_photo.setIcon(render_icon("photo", 13, COLOR_TEXT_MUTED))
             self.btn_mode_video.setStyleSheet(active_style)
             self.btn_mode_video.setIcon(render_icon("video", 13, COLOR_ACCENT))
+        if hasattr(self, "btn_mode_gallery"):
+            self.btn_mode_gallery.setStyleSheet(inactive_style)
+            self.btn_mode_gallery.setIcon(render_icon("gallery", 13, COLOR_TEXT_MUTED))
 
     def _apply_dynamic_styles(self):
         if hasattr(self, "header_bar"):

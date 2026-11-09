@@ -180,6 +180,11 @@ class ExportDialog(QDialog):
         self.cb_workspace.toggled.connect(self._on_workspace_toggled)
         dest_layout.addWidget(self.cb_workspace)
 
+        self.cb_add_to_gallery = QCheckBox("Also add Selected photographs to FRAMED Gallery")
+        self.cb_add_to_gallery.setFont(get_body_font(12))
+        self.cb_add_to_gallery.setChecked(True)
+        dest_layout.addWidget(self.cb_add_to_gallery)
+
         if getattr(self.project, "is_match_mode", False):
             quota = getattr(self.project, "max_selected_count", 0)
             m_count = min(self.project.kept_count, quota) if quota > 0 else self.project.kept_count
@@ -573,6 +578,12 @@ class ExportDialog(QDialog):
 
     def _on_finished(self, summary: dict):
         self.exported_dir = summary.get("base_dir")
+        if hasattr(self, "cb_add_to_gallery") and self.cb_add_to_gallery.isChecked():
+            try:
+                from loupe.core.gallery_engine import GalleryImporter
+                GalleryImporter.import_from_session(self.project, include_mode="selected", import_mode="reference")
+            except Exception as e:
+                print(f"[ExportDialog] Gallery sync notice: {e}")
         self.progress_bar.setValue(100)
         self.pct_lbl.setText("100%")
         self.speed_lbl.setText("Export completed successfully.")

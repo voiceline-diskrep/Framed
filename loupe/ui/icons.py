@@ -277,6 +277,127 @@ def render_icon(name: str, size: int = 16, color_hex: str = "#EDEFEA") -> QIcon:
         path.closeSubpath()
         painter.drawPath(path)
 
+    elif name == "gallery":
+        # Stacked photo frames with mountain landscape
+        r1 = QRectF(pad + 2, pad, s - pad * 2 - 2, s - pad * 2 - 2)
+        painter.drawRoundedRect(r1, 2.0, 2.0)
+        painter.drawEllipse(QPointF(r1.left() + r1.width() * 0.28, r1.top() + r1.height() * 0.28), 1.3, 1.3)
+        path = QPainterPath()
+        path.moveTo(r1.left() + 1, r1.bottom() - 1)
+        path.lineTo(r1.left() + r1.width() * 0.35, r1.top() + r1.height() * 0.55)
+        path.lineTo(r1.left() + r1.width() * 0.58, r1.top() + r1.height() * 0.72)
+        path.lineTo(r1.left() + r1.width() * 0.78, r1.top() + r1.height() * 0.48)
+        path.lineTo(r1.right() - 1, r1.bottom() - 1)
+        painter.drawPath(path)
+        # Back frame corner
+        painter.drawLine(QPointF(pad, pad + 3), QPointF(pad, s - pad))
+        painter.drawLine(QPointF(pad, s - pad), QPointF(s - pad - 3, s - pad))
+
+    elif name in ("heart", "heart_filled"):
+        path = QPainterPath()
+        cx = s / 2.0
+        top_y = pad + s * 0.14
+        bottom_y = s - pad * 1.05
+        path.moveTo(cx, bottom_y)
+        path.cubicTo(QPointF(pad * 0.4, s * 0.58), QPointF(pad * 0.5, pad * 0.8), QPointF(cx, top_y + s * 0.12))
+        path.cubicTo(QPointF(s - pad * 0.5, pad * 0.8), QPointF(s - pad * 0.4, s * 0.58), QPointF(cx, bottom_y))
+        if name == "heart_filled":
+            painter.setBrush(QBrush(color))
+        painter.drawPath(path)
+
+    elif name in ("star", "star_filled"):
+        path = QPainterPath()
+        cx, cy = s / 2.0, s / 2.0
+        r_out = (s - pad * 2) * 0.52
+        r_in = r_out * 0.42
+        for i in range(10):
+            angle = -math.pi / 2 + i * (math.pi / 5)
+            r = r_out if i % 2 == 0 else r_in
+            pt = QPointF(cx + r * math.cos(angle), cy + r * math.sin(angle))
+            if i == 0:
+                path.moveTo(pt)
+            else:
+                path.lineTo(pt)
+        path.closeSubpath()
+        if name == "star_filled":
+            painter.setBrush(QBrush(color))
+        painter.drawPath(path)
+
+    elif name in ("map_pin", "location"):
+        cx = s / 2.0
+        r = (s - pad * 2) * 0.34
+        cy = pad + r + 1
+        path = QPainterPath()
+        path.moveTo(cx, s - pad)
+        path.cubicTo(QPointF(cx - r * 1.15, cy + r * 0.5), QPointF(cx - r, cy - r * 0.9), QPointF(cx, cy - r))
+        path.cubicTo(QPointF(cx + r, cy - r * 0.9), QPointF(cx + r * 1.15, cy + r * 0.5), QPointF(cx, s - pad))
+        painter.drawPath(path)
+        painter.drawEllipse(QPointF(cx, cy), r * 0.38, r * 0.38)
+
+    elif name in ("warning", "alert"):
+        path = QPainterPath()
+        path.moveTo(s / 2.0, pad)
+        path.lineTo(s - pad, s - pad)
+        path.lineTo(pad, s - pad)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawLine(QPointF(s / 2.0, pad + s * 0.28), QPointF(s / 2.0, s - pad - s * 0.24))
+        painter.drawEllipse(QPointF(s / 2.0, s - pad - s * 0.11), 0.9, 0.9)
+
+    elif name in ("database", "storage"):
+        rx = (s - pad * 2) / 2.0
+        ry = rx * 0.38
+        cx = s / 2.0
+        top_cy = pad + ry
+        bot_cy = s - pad - ry
+        painter.drawEllipse(QPointF(cx, top_cy), rx, ry)
+        painter.drawLine(QPointF(pad, top_cy), QPointF(pad, bot_cy))
+        painter.drawLine(QPointF(s - pad, top_cy), QPointF(s - pad, bot_cy))
+        painter.drawArc(QRectF(pad, (top_cy + bot_cy) / 2 - ry, rx * 2, ry * 2), 180 * 16, 180 * 16)
+        painter.drawArc(QRectF(pad, bot_cy - ry, rx * 2, ry * 2), 180 * 16, 180 * 16)
+
+    elif name in ("sparkles", "smart"):
+        cx, cy = s / 2.0, s / 2.0
+        r = (s - pad * 2) * 0.45
+        path = QPainterPath()
+        path.moveTo(cx, cy - r)
+        path.quadTo(QPointF(cx, cy), QPointF(cx + r, cy))
+        path.quadTo(QPointF(cx, cy), QPointF(cx, cy + r))
+        path.quadTo(QPointF(cx, cy), QPointF(cx - r, cy))
+        path.quadTo(QPointF(cx, cy), QPointF(cx, cy - r))
+        painter.drawPath(path)
+
+    elif name == "compare":
+        rect = QRectF(pad, pad + 1, s - pad * 2, s - pad * 2 - 2)
+        painter.drawRoundedRect(rect, 2.0, 2.0)
+        painter.drawLine(QPointF(s / 2.0, pad), QPointF(s / 2.0, s - pad))
+
+    elif name == "play":
+        path = QPainterPath()
+        path.moveTo(s * 0.32, pad * 1.2)
+        path.lineTo(s - pad * 1.1, s / 2.0)
+        path.lineTo(s * 0.32, s - pad * 1.2)
+        path.closeSubpath()
+        painter.setBrush(QBrush(color))
+        painter.drawPath(path)
+
+    elif name == "pause":
+        painter.drawLine(QPointF(s * 0.36, pad * 1.2), QPointF(s * 0.36, s - pad * 1.2))
+        painter.drawLine(QPointF(s * 0.64, pad * 1.2), QPointF(s * 0.64, s - pad * 1.2))
+
+    elif name == "duplicate":
+        w = (s - pad * 2) * 0.68
+        painter.drawRoundedRect(QRectF(pad, pad, w, w), 1.5, 1.5)
+        painter.drawRoundedRect(QRectF(s - pad - w, s - pad - w, w, w), 1.5, 1.5)
+
+    elif name == "bulb":
+        cx = s / 2.0
+        r = (s - pad * 2) * 0.34
+        cy = pad + r
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+        painter.drawLine(QPointF(cx - r * 0.5, s - pad - 2.5), QPointF(cx + r * 0.5, s - pad - 2.5))
+        painter.drawLine(QPointF(cx - r * 0.35, s - pad), QPointF(cx + r * 0.35, s - pad))
+
     else:
         # Default dot
         painter.drawEllipse(QPointF(s / 2, s / 2), 2, 2)

@@ -1294,6 +1294,180 @@ class TestLoupeWorkstation(unittest.TestCase):
         self.assertFalse(is_current_theme_light())
 
 
+
+    def test_gallery_import_folders_and_deduplicated_storage_stats(self):
+        """Verify Gallery photo import (Reference vs Copy), nested folders, safe folder deletion, and deduplicated storage pie-chart math."""
+        from loupe.core.gallery_engine import GalleryImporter
+        from loupe.storage import storage, format_bytes
+        from PIL import Image
+
+        storage.gallery_photos.clear()
+        storage.gallery_folders.clear()
+        storage._seed_gallery_defaults(save_after=False)
+
+        # Create 2 sample JPEGs and 1 sample RAW file
+        g_dir = os.path.join(self.temp_dir, "gallery_samples")
+        os.makedirs(g_dir, exist_ok=True)
+        jpg1 = os.path.join(g_dir, "IMG_1001.JPG")
+        jpg2 = os.path.join(g_dir, "IMG_1002.JPG")
+        raw1 = os.path.join(g_dir, "IMG_1001.CR3")
+
+        Image.new("RGB", (640, 480), color=(245, 158, 11)).save(jpg1, "JPEG", quality=90)
+        Image.new("RGB", (640, 480), color=(59, 130, 246)).save(jpg2, "JPEG", quality=90)
+        # Create a 50KB dummy RAW file (or valid image container with .CR3 extension)
+        Image.new("RGB", (800, 600), color=(34, 197, 94)).save(raw1, "JPEG", quality=95)
+
+        school_folder = storage.get_gallery_folder("gf_school")
+        self.assertIsNotNone(school_folder)
+
+        # 1. Import via Reference mode into 'School Pictures'
+        res = GalleryImporter.import_files(
+            [jpg1, jpg2, raw1],
+            copy_to_gallery=False,
+            target_folder_id="gf_school",
+            skip_duplicates=True,
+        )
+        self.assertEqual(res["imported"], 3)
+        self.assertEqual(res["skipped"], 0)
+
+        # Duplicate detection: importing again must skip all 3
+        res_dup = GalleryImporter.import_files([jpg1, jpg2, raw1], copy_to_gallery=False, skip_duplicates=True)
+        self.assertEqual(res_dup["imported"], 0)
+        self.assertEqual(res_dup["skipped"], 3)
+
+        # Assign photos to a second folder ('Gramp's Birthday') as well and verify storage is NOT double-counted
+        all_ids = list(storage.gallery_photos.keys())
+        storage.assign_photos_to_folder(all_ids, "gf_gramp")
+
+        stats = storage.calculate_gallery_statistics()
+        self.assertEqual(stats["total_photos"], 3)
+        self.assertEqual(stats["raw_count"], 1)
+        self.assertEqual(stats["jpeg_count"], 2)
+        expected_bytes = os.path.getsize(jpg1) + os.path.getsize(jpg2) + os.path.getsize(raw1)
+        self.assertEqual(stats["total_bytes"], expected_bytes)
+        self.assertGreater(stats["raw_percent"] + stats["jpeg_percent"], 99.0)
+
+        # 2. Create nested folder and test safe folder deletion (photographs must NEVER be deleted)
+        grad_folder = storage.create_gallery_folder("Graduation", parent_id="gf_school")
+        storage.assign_photos_to_folder(all_ids, grad_folder.id)
+        self.assertEqual(storage.count_photos_in_gallery_folder("gf_school", include_subfolders=True), 3)
+
+        storage.delete_gallery_folder(grad_folder.id, reassign_to_folder_id="gf_vacations")
+        self.assertIsNone(storage.get_gallery_folder(grad_folder.id))
+        self.assertEqual(len(storage.get_active_gallery_photos()), 3)
+        self.assertTrue(os.path.exists(jpg1))
+        self.assertTrue(os.path.exists(raw1))
+
+    def test_gallery_raw_to_jpeg_conversion_and_two_stage_warning_ui(self):
+        """Verify RAW-to-JPEG conversion engine, 2-stage warning dialog flow, and original RAW preservation."""
+        from loupe.core.gallery_engine import GalleryImporter, RawToJpegConverter
+        from loupe.ui.gallery_dialogs import RawConversionDialog
+        from loupe.storage import storage
+        from PIL import Image
+
+        storage.gallery_photos.clear()
+        raw_dir = os.path.join(self.temp_dir, "raw_conv_test")
+        os.makedirs(raw_dir, exist_ok=True)
+        raw_file = os.path.join(raw_dir, "DSC_9001.ARW")
+        Image.new("RGB", (1000, 750), color=(180, 90, 40)).save(raw_file, "BMP")
+
+        GalleryImporter.import_files([raw_file], copy_to_gallery=False)
+        raw_photos = [p for p in storage.get_active_gallery_photos() if p.is_raw]
+        self.assertEqual(len(raw_photos), 1)
+
+        # Verify 2-Stage Warning Dialog pages exist and transition properly
+        dlg = RawConversionDialog(raw_photos)
+        self.assertEqual(dlg.stack.currentIndex(), 0)
+        dlg._go_to_warning_stage1()
+        self.assertEqual(dlg.stack.currentIndex(), 1)
+        self.assertIn("RAW", dlg.stage1_stats_lbl.text())
+        dlg._go_to_warning_stage2()
+        self.assertEqual(dlg.stack.currentIndex(), 2)
+        self.assertIn("Converted_JPEG", dlg.stage2_details_lbl.text())
+
+        # Execute batch conversion and verify original RAW file is untouched & paired
+        out_dir = os.path.join(self.temp_dir, "converted_jpegs")
+        conv_res = RawToJpegConverter.convert_batch(raw_photos, output_dir=out_dir, quality=85, add_converted_to_gallery=True)
+        self.assertEqual(conv_res["completed"], 1)
+        self.assertTrue(os.path.exists(raw_file))  # Original RAW untouched!
+        self.assertTrue(os.path.exists(conv_res["converted_paths"][0]))
+        self.assertEqual(raw_photos[0].paired_jpeg_path, conv_res["converted_paths"][0])
+        self.assertGreater(conv_res["saved_bytes"], 0)
+
+    def test_gallery_smart_albums_missing_recovery_duplicates_backup_and_ui(self):
+        """Verify Smart Albums, Favorites/Ratings, Missing File Recovery, Duplicate Finder, Backup, Recently Deleted, and GalleryView UI."""
+        from loupe.core.gallery_engine import (
+            GalleryImporter, MissingFileRecoveryEngine, DuplicateFinderEngine, GalleryBackupEngine
+        )
+        from loupe.ui.gallery_view import GalleryView
+        from loupe.app import FramedMainWindow
+        from loupe.storage import storage
+        from PIL import Image
+        import shutil
+
+        storage.gallery_photos.clear()
+        t_dir = os.path.join(self.temp_dir, "gallery_adv")
+        os.makedirs(t_dir, exist_ok=True)
+        p1 = os.path.join(t_dir, "MEMORY_1.JPG")
+        p2_dup = os.path.join(t_dir, "MEMORY_1_COPY.JPG")
+        Image.new("RGB", (500, 400), color=(120, 40, 200)).save(p1, "JPEG", quality=92)
+        shutil.copy2(p1, p2_dup)
+
+        # Import both (with skip_duplicates=False so we can test DuplicateFinderEngine)
+        GalleryImporter.import_files([p1, p2_dup], copy_to_gallery=False, skip_duplicates=False)
+        photos = storage.get_active_gallery_photos()
+        self.assertEqual(len(photos), 2)
+
+        # 1. Duplicate Finder detects exact SHA-256 duplicate
+        dups = DuplicateFinderEngine.find_duplicates(include_similar=True)
+        self.assertEqual(len(dups["exact"]), 1)
+        self.assertEqual(len(dups["exact"][0]), 2)
+
+        # 2. Favorites, 5-Star Rating & Smart Album matching
+        storage.toggle_gallery_favorite(photos[0].id)
+        storage.set_photo_rating([photos[0].id], rating=5, color_label="green", notes="Best memory")
+        sa_5star = storage.smart_albums.get("sa_5star")
+        self.assertIsNotNone(sa_5star)
+        self.assertTrue(sa_5star.matches(photos[0]))
+        self.assertFalse(sa_5star.matches(photos[1]))
+
+        # 3. Missing File Detection & Verified Recovery (relocate file and reconnect by SHA-256 + size)
+        relocated_dir = os.path.join(self.temp_dir, "relocated_folder")
+        os.makedirs(relocated_dir, exist_ok=True)
+        relocated_p1 = os.path.join(relocated_dir, "MEMORY_1.JPG")
+        shutil.move(p1, relocated_p1)
+
+        missing_cnt = storage.refresh_missing_file_status()
+        self.assertEqual(missing_cnt, 1)
+        self.assertTrue(photos[0].is_missing)
+
+        rec_res = MissingFileRecoveryEngine.scan_directory_and_reconnect(relocated_dir)
+        self.assertEqual(rec_res["reconnected"], 1)
+        self.assertFalse(photos[0].is_missing)
+
+        # 4. Recently Deleted soft-delete & restore
+        storage.soft_delete_photos([photos[1].id])
+        self.assertEqual(len(storage.get_active_gallery_photos()), 1)
+        self.assertEqual(len(storage.get_deleted_gallery_photos()), 1)
+        storage.restore_deleted_photos([photos[1].id])
+        self.assertEqual(len(storage.get_active_gallery_photos()), 2)
+
+        # 5. Verified Gallery Backup
+        bk_dir = os.path.join(self.temp_dir, "backup_dest")
+        bk_res = GalleryBackupEngine.run_backup(bk_dir, include_referenced=True, verify_hashes=True)
+        self.assertTrue(bk_res["success"])
+        self.assertEqual(bk_res["completed"], 2)
+
+        # 6. GalleryView & FramedMainWindow navigation
+        win = FramedMainWindow()
+        win._show_gallery()
+        self.assertEqual(win.stack.currentWidget(), win.gallery_view)
+        win.gallery_view._select_section("memories")
+        win.gallery_view._select_section("map")
+        win.gallery_view._select_section("all")
+        self.assertEqual(win.gallery_view.kpi_total_lbl.text(), "2")
+
+
 if __name__ == "__main__":
     import unittest
     suite = unittest.TestLoader().loadTestsFromTestCase(TestLoupeWorkstation)

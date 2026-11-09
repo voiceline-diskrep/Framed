@@ -1,4 +1,4 @@
-"""Main application coordinator integrating Dashboard, Photo Review, Video Review, Tour, and Settings."""
+"""Main application coordinator integrating Dashboard, Photo Review, Video Review, Gallery, Tour, and Settings."""
 
 import sys
 import os
@@ -24,6 +24,8 @@ from loupe.ui.settings_dialog import SettingsDialog
 from loupe.ui.export_dialog import ExportDialog
 from loupe.ui.video_export_dialog import VideoExportDialog
 from loupe.ui.tour_overlay import TourDialog
+from loupe.ui.gallery_view import GalleryView
+
 
 class FramedMainWindow(QMainWindow):
     def __init__(self):
@@ -46,12 +48,14 @@ class FramedMainWindow(QMainWindow):
         self.video_review_view = VideoReviewView(self)
         self.photo_setup_view = SessionSetupView(self)
         self.video_setup_view = VideoSessionView(self)
+        self.gallery_view = GalleryView(self)
 
         self.stack.addWidget(self.dashboard_view)        # Index 0: Dashboard
         self.stack.addWidget(self.review_view)           # Index 1: Photo Culling View
         self.stack.addWidget(self.video_review_view)     # Index 2: Video Sorting View
         self.stack.addWidget(self.photo_setup_view)      # Index 3: In-App Photo Session Setup
         self.stack.addWidget(self.video_setup_view)      # Index 4: In-App Video Session Setup
+        self.stack.addWidget(self.gallery_view)          # Index 5: FRAMED Complete Gallery View
 
         self._connect_signals()
 
@@ -90,6 +94,15 @@ class FramedMainWindow(QMainWindow):
         self.dashboard_view.export_project_requested.connect(self._export_project)
         self.dashboard_view.open_settings_requested.connect(self._open_settings)
         self.dashboard_view.fullscreen_requested.connect(self.toggle_fullscreen)
+        self.dashboard_view.gallery_requested.connect(self._show_gallery)
+
+        # Gallery View signals
+        self.gallery_view.mode_switch_requested.connect(self._on_gallery_mode_switch)
+        self.gallery_view.new_session_requested.connect(self._open_new_session_dialog)
+        self.gallery_view.drive_settings_requested.connect(self.dashboard_view._open_gdrive_manager)
+        self.gallery_view.theme_menu_requested.connect(lambda _btn: self.dashboard_view._open_theme_menu())
+        self.gallery_view.settings_requested.connect(self._open_settings)
+        self.gallery_view.fullscreen_requested.connect(self.toggle_fullscreen)
 
         # In-App Session Setup signals (100% native, zero popout windows!)
         self.photo_setup_view.session_created.connect(self._open_project)
@@ -104,6 +117,17 @@ class FramedMainWindow(QMainWindow):
         # Video Review screen signals
         self.video_review_view.back_to_dashboard.connect(self._show_dashboard)
         self.video_review_view.export_requested.connect(self._export_project)
+
+    def _show_gallery(self):
+        self.review_view.unload_project()
+        self.video_review_view.unload_project()
+        self.gallery_view.refresh_all()
+        self.stack.setCurrentWidget(self.gallery_view)
+
+    def _on_gallery_mode_switch(self, mode: str):
+        if mode in ("photo", "video"):
+            self.dashboard_view._set_media_mode(mode)
+            self._show_dashboard()
 
     def _open_new_session_dialog(self):
         # Switch in-app natively — no popup windows!
@@ -182,7 +206,6 @@ class FramedMainWindow(QMainWindow):
         tour = TourDialog(self)
         tour.exec()
 
-
     def _on_theme_changed(self, theme_id: str):
         from loupe.ui.theme import COLOR_ACCENT
         self.setWindowIcon(render_icon("loupe", 32, COLOR_ACCENT))
@@ -204,11 +227,12 @@ class FramedMainWindow(QMainWindow):
 # Alias for backward compatibility
 LoupeMainWindow = FramedMainWindow
 
+
 def create_app() -> QApplication:
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
-    
+
     # Load and apply active or saved theme
     saved_theme = config.get("theme", "dark_amber")
     apply_theme(saved_theme, app)
@@ -222,6 +246,7 @@ def main():
     window = FramedMainWindow()
     window.showMaximized()
     return app.exec()
+
 
 if __name__ == "__main__":
     sys.exit(main())

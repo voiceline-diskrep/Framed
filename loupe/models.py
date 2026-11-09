@@ -200,3 +200,207 @@ class Project:
         valid_fields = {f.name for f in dataclasses.fields(cls) if f.name != "items"}
         filtered = {k: v for k, v in data_copy.items() if k in valid_fields}
         return cls(items=items, **filtered)
+
+
+# ==============================================================================
+# FRAMED GALLERY MODELS
+# ==============================================================================
+
+@dataclass
+class GalleryFolder:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = "New Folder"
+    parent_id: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GalleryFolder":
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
+
+
+@dataclass
+class GalleryPhoto:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    filename: str = ""
+    original_path: str = ""
+    managed_path: Optional[str] = None
+    paired_jpeg_path: Optional[str] = None
+    paired_raw_path: Optional[str] = None
+    is_managed: bool = False
+    format_type: str = "JPEG"  # "RAW", "JPEG", "OTHER"
+    ext: str = ".jpg"
+    size_bytes: int = 0
+    paired_size_bytes: int = 0
+    width: int = 0
+    height: int = 0
+    capture_date: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
+    capture_datetime: str = ""
+    date_source: str = "exif"  # "exif" or "import"
+    imported_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    folder_ids: List[str] = field(default_factory=list)
+    is_favorite: bool = False
+    rating: int = 0  # 0..5
+    color_label: str = "none"  # "none", "red", "yellow", "green", "blue", "purple"
+    notes: str = ""
+    camera_make: str = "—"
+    camera_model: str = "—"
+    camera: str = "Unknown Camera"
+    lens: str = "—"
+    iso: str = "—"
+    shutter_speed: str = "—"
+    aperture: str = "—"
+    focal_length: str = "—"
+    gps_lat: Optional[float] = None
+    gps_lon: Optional[float] = None
+    location_name: str = ""
+    file_hash: str = ""
+    perceptual_hash: str = ""
+    thumbnail_path: Optional[str] = None
+    is_missing: bool = False
+    is_deleted: bool = False
+    deleted_at: Optional[str] = None
+    previous_folder_ids: List[str] = field(default_factory=list)
+    source_session_id: Optional[str] = None
+
+    @property
+    def active_path(self) -> str:
+        """Returns the managed path if copied into Gallery and existing, otherwise original path."""
+        if self.is_managed and self.managed_path and os.path.exists(self.managed_path):
+            return self.managed_path
+        if self.managed_path and os.path.exists(self.managed_path):
+            return self.managed_path
+        return self.original_path
+
+    @property
+    def dimensions_str(self) -> str:
+        if self.width > 0 and self.height > 0:
+            return f"{self.width} × {self.height}"
+        return "—"
+
+    @property
+    def has_gps(self) -> bool:
+        return self.gps_lat is not None and self.gps_lon is not None
+
+    @property
+    def is_raw(self) -> bool:
+        return self.format_type.upper() == "RAW"
+
+    @property
+    def is_jpeg(self) -> bool:
+        return self.format_type.upper() == "JPEG"
+
+    @property
+    def extension(self) -> str:
+        return self.ext
+
+    @property
+    def date_taken(self) -> str:
+        return self.capture_date
+
+    @property
+    def gps_label(self) -> str:
+        return self.location_name
+
+    @gps_label.setter
+    def gps_label(self, val: str) -> None:
+        self.location_name = val
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GalleryPhoto":
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
+
+
+@dataclass
+class SmartAlbum:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = "Smart Album"
+    rules: Dict[str, Any] = field(default_factory=dict)
+    is_builtin: bool = False
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def matches(self, photo: GalleryPhoto) -> bool:
+        if photo.is_deleted:
+            return False
+        r = self.rules
+        if r.get("format_type") and r["format_type"] != "ANY":
+            if photo.format_type.upper() != r["format_type"].upper():
+                return False
+        if r.get("is_favorite") is True and not photo.is_favorite:
+            return False
+        if r.get("min_rating") is not None and int(r["min_rating"]) > 0:
+            if photo.rating < int(r["min_rating"]):
+                return False
+        if r.get("unrated_only") is True and photo.rating > 0:
+            return False
+        if r.get("year"):
+            yr = str(r["year"]).strip()
+            if yr and not photo.capture_date.startswith(yr):
+                return False
+        if r.get("camera_contains"):
+            cam_q = str(r["camera_contains"]).strip().lower()
+            if cam_q and cam_q not in photo.camera.lower() and cam_q not in photo.camera_model.lower():
+                return False
+        if r.get("min_size_mb") is not None and float(r["min_size_mb"]) > 0:
+            if photo.size_bytes < float(r["min_size_mb"]) * 1024 * 1024:
+                return False
+        if r.get("color_label") and r["color_label"] not in ("any", "none", ""):
+            if photo.color_label != r["color_label"]:
+                return False
+        return True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SmartAlbum":
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
+
+
+@dataclass
+class GalleryActivity:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    action_type: str = "import"  # "import", "folder", "favorite", "convert", "backup", "delete"
+    title: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GalleryActivity":
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
+
+
+@dataclass
+class BackupRecord:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    destination_dir: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    files_completed: int = 0
+    files_failed: int = 0
+    total_bytes: int = 0
+    included_referenced: bool = True
+    verified: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BackupRecord":
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
