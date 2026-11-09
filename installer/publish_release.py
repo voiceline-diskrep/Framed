@@ -20,7 +20,7 @@ def publish_release(
 ):
     token = get_token()
     repo = "voiceline-diskrep/Framed"
-    name = "Framed v1.3.2 — Match Pictures Quota Animations & Dynamic Color Feedback"
+    name = "Framed v1.3.3 — Match Selection Export Folder & Theme Engine Redesign"
     body = (
         "## What's Changed in Framed v1.3.2\n\n"
         "### 📸 Match Pictures Mode (Selection Quota)\n"
