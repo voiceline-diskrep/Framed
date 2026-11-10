@@ -2978,20 +2978,20 @@ class DashboardView(QWidget):
     def _setup_bulk_bar(self):
         self.bulk_bar = QFrame(self.right_area)
         self.bulk_bar.setObjectName("floatingBulkBar")
-        self.bulk_bar.setFixedHeight(50)
+        self.bulk_bar.setFixedHeight(48)
         self.bulk_bar.setStyleSheet(f"""
             QFrame#floatingBulkBar {{
                 background-color: #171A21;
                 border: 1.5px solid {COLOR_ACCENT};
-                border-radius: 25px;
+                border-radius: 24px;
             }}
         """)
         bb_layout = QHBoxLayout(self.bulk_bar)
-        bb_layout.setContentsMargins(16, 6, 16, 6)
-        bb_layout.setSpacing(12)
+        bb_layout.setContentsMargins(14, 0, 14, 0)
+        bb_layout.setSpacing(8)
 
         self.bulk_count_lbl = QLabel("0 Selected")
-        self.bulk_count_lbl.setFont(get_body_font(12, bold=True))
+        self.bulk_count_lbl.setFont(get_body_font(11, bold=True))
         self.bulk_count_lbl.setStyleSheet(f"color: {COLOR_ACCENT};")
         bb_layout.addWidget(self.bulk_count_lbl)
 
@@ -3002,78 +3002,90 @@ class DashboardView(QWidget):
         sep1.setStyleSheet(f"background-color: {COLOR_BORDER_DISTINCT};")
         bb_layout.addWidget(sep1)
 
-        self.btn_bulk_resume = QPushButton(" ▶  Resume Culling All")
+        self.btn_bulk_resume = QPushButton(" Resume All")
+        self.btn_bulk_resume.setIcon(render_icon("play", 11, COLOR_ACCENT))
         self.btn_bulk_resume.setFont(get_body_font(11, bold=True))
         self.btn_bulk_resume.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_resume.setFixedHeight(32)
         self.btn_bulk_resume.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLOR_BG_ELEVATED};
                 color: {COLOR_TEXT_PRIMARY};
                 border: 1px solid {COLOR_BORDER_DISTINCT};
-                border-radius: 14px;
-                padding: 5px 14px;
+                border-radius: 16px;
+                padding: 0 12px;
             }}
             QPushButton:hover {{
                 border-color: {COLOR_ACCENT};
                 color: {COLOR_ACCENT};
             }}
         """)
+        self.btn_bulk_resume.setToolTip("Resume culling all selected sessions in sequential queue")
         self.btn_bulk_resume.clicked.connect(self._on_bulk_resume_all)
         bb_layout.addWidget(self.btn_bulk_resume)
 
-        self.btn_bulk_export = QPushButton(" 📤  Export All in Order")
+        self.btn_bulk_export = QPushButton(" Export All in Order")
+        self.btn_bulk_export.setIcon(render_icon("export", 11, "#FFFFFF"))
         self.btn_bulk_export.setFont(get_body_font(11, bold=True))
         self.btn_bulk_export.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_export.setFixedHeight(32)
         self.btn_bulk_export.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLOR_ACCENT}, stop:1 {COLOR_ACCENT_PRESSED});
                 color: #FFFFFF;
                 border: 1px solid {COLOR_ACCENT_HOVER};
-                border-radius: 14px;
-                padding: 5px 16px;
+                border-radius: 16px;
+                padding: 0 14px;
                 font-weight: 700;
             }}
             QPushButton:hover {{
                 background: {COLOR_ACCENT_HOVER};
             }}
         """)
+        self.btn_bulk_export.setToolTip("Batch export all selected sessions in exact order")
         self.btn_bulk_export.clicked.connect(self._on_bulk_export_all)
         bb_layout.addWidget(self.btn_bulk_export)
 
-        self.btn_bulk_move = QPushButton(" 📁  Move to Folder")
+        self.btn_bulk_move = QPushButton(" Move to Folder")
+        self.btn_bulk_move.setIcon(render_icon("folder", 11, COLOR_TEXT_PRIMARY))
         self.btn_bulk_move.setFont(get_body_font(11))
         self.btn_bulk_move.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_move.setFixedHeight(32)
         self.btn_bulk_move.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLOR_BG_ELEVATED};
                 color: {COLOR_TEXT_PRIMARY};
                 border: 1px solid {COLOR_BORDER_DISTINCT};
-                border-radius: 14px;
-                padding: 5px 14px;
+                border-radius: 16px;
+                padding: 0 10px;
             }}
             QPushButton:hover {{
                 border-color: {COLOR_ACCENT};
             }}
         """)
+        self.btn_bulk_move.setToolTip("Move selected sessions to another workspace folder")
         self.btn_bulk_move.clicked.connect(self._on_bulk_move)
         bb_layout.addWidget(self.btn_bulk_move)
 
-        self.btn_bulk_del = QPushButton(" 🗑  Delete All")
+        self.btn_bulk_del = QPushButton(" Delete All")
+        self.btn_bulk_del.setIcon(render_icon("trash", 11, "#F87171"))
         self.btn_bulk_del.setFont(get_body_font(11, bold=True))
         self.btn_bulk_del.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_del.setFixedHeight(32)
         self.btn_bulk_del.setStyleSheet("""
             QPushButton {
                 background-color: #331A1D;
                 color: #F87171;
                 border: 1px solid #7F1D1D;
-                border-radius: 14px;
-                padding: 5px 14px;
+                border-radius: 16px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #4A2227;
                 border-color: #EF4444;
             }
         """)
+        self.btn_bulk_del.setToolTip("Delete all selected sessions (with 5-second safety timer)")
         self.btn_bulk_del.clicked.connect(self._on_bulk_delete_all)
         bb_layout.addWidget(self.btn_bulk_del)
 
@@ -3084,20 +3096,23 @@ class DashboardView(QWidget):
         sep2.setStyleSheet(f"background-color: {COLOR_BORDER_DISTINCT};")
         bb_layout.addWidget(sep2)
 
-        self.btn_bulk_deselect = QPushButton("✕ Deselect")
-        self.btn_bulk_deselect.setFont(get_body_font(11))
+        self.btn_bulk_deselect = QPushButton(" Deselect")
+        self.btn_bulk_deselect.setIcon(render_icon("cross", 9, COLOR_TEXT_MUTED))
+        self.btn_bulk_deselect.setFont(get_body_font(10))
         self.btn_bulk_deselect.setCursor(Qt.PointingHandCursor)
+        self.btn_bulk_deselect.setFixedHeight(32)
         self.btn_bulk_deselect.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
                 color: {COLOR_TEXT_MUTED};
                 border: none;
-                padding: 5px 10px;
+                padding: 0 8px;
             }}
             QPushButton:hover {{
                 color: {COLOR_TEXT_PRIMARY};
             }}
         """)
+        self.btn_bulk_deselect.setToolTip("Deselect all sessions")
         self.btn_bulk_deselect.clicked.connect(self._deselect_all)
         bb_layout.addWidget(self.btn_bulk_deselect)
 
@@ -3107,10 +3122,35 @@ class DashboardView(QWidget):
         if hasattr(self, "bulk_bar") and hasattr(self, "right_area"):
             rw = self.right_area.width()
             rh = self.right_area.height()
-            bar_w = min(720, max(500, rw - 60))
+            if rw <= 0 or rh <= 0:
+                return
+
+            # Responsively adapt button labels based on available width so text is NEVER clipped
+            if rw >= 980:
+                self.btn_bulk_resume.setText(" Resume All")
+                self.btn_bulk_export.setText(" Export All in Order")
+                self.btn_bulk_move.setText(" Move to Folder")
+                self.btn_bulk_del.setText(" Delete All")
+                self.btn_bulk_deselect.setText(" Deselect")
+            elif rw >= 780:
+                self.btn_bulk_resume.setText(" Resume All")
+                self.btn_bulk_export.setText(" Export in Order")
+                self.btn_bulk_move.setText(" Move")
+                self.btn_bulk_del.setText(" Delete")
+                self.btn_bulk_deselect.setText(" Deselect")
+            else:
+                self.btn_bulk_resume.setText(" Resume")
+                self.btn_bulk_export.setText(" Export")
+                self.btn_bulk_move.setText(" Move")
+                self.btn_bulk_del.setText(" Delete")
+                self.btn_bulk_deselect.setText(" ✕")
+
+            self.bulk_bar.adjustSize()
+            needed_w = self.bulk_bar.sizeHint().width() + 16
+            bar_w = min(rw - 28, max(needed_w, 400))
             self.bulk_bar.setFixedWidth(bar_w)
             bx = (rw - bar_w) // 2
-            by = rh - 66
+            by = max(16, rh - 72)
             self.bulk_bar.move(bx, by)
 
     def _update_bulk_bar(self):

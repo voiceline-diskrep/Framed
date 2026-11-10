@@ -109,6 +109,13 @@ class TestV152Features(unittest.TestCase):
         self.assertFalse(dash.bulk_bar.isHidden())
         self.assertIn("2 Selected", dash.bulk_count_lbl.text())
 
+        dash.resize(1280, 840)
+        dash.right_area.resize(1040, 800)
+        dash._position_bulk_bar()
+        self.assertGreaterEqual(dash.bulk_bar.width(), dash.bulk_bar.sizeHint().width())
+        self.assertFalse(dash.btn_bulk_resume.icon().isNull())
+        self.assertFalse(dash.btn_bulk_export.icon().isNull())
+
         dash._deselect_all()
         self.assertEqual(len(dash.selected_project_ids), 0)
         self.assertTrue(dash.bulk_bar.isHidden())
