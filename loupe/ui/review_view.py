@@ -1,21 +1,34 @@
 """Review screen culling workstation with full-resolution rendering, loupe zoom/pan, EXIF panel, and pause/resume."""
 
 import os
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QMessageBox, QDialog, QGraphicsView, QGraphicsScene,
-    QGraphicsPixmapItem, QGraphicsRectItem, QProgressBar
+    QGraphicsPixmapItem, QGraphicsItem, QGraphicsRectItem, QProgressBar
 )
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QPropertyAnimation, QVariantAnimation, QEasingCurve, QTimer
+from PySide6.QtCore import Qt, Signal, QRect, QRectF, QPointF, QPoint, QPropertyAnimation, QVariantAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import (
-    QImage, QPixmap, QWheelEvent, QKeyEvent, QPainter, QBrush, QColor, QFont
+    QGuiApplication, QImage, QPixmap, QWheelEvent, QKeyEvent, QPainter, QBrush, QColor, QFont
 )
 from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+try:
+    from PySide6.QtOpenGLWidgets import QOpenGLWidget
+    from PySide6.QtOpenGL import QOpenGLTextureBlitter
+    from PySide6.QtGui import QOpenGLContext
+    _HAS_QT_OPENGL = True
+except Exception:
+    QOpenGLWidget = None  # type: ignore
+    QOpenGLTextureBlitter = None  # type: ignore
+    QOpenGLContext = None  # type: ignore
+    _HAS_QT_OPENGL = False
+
 from loupe.config import config
 from loupe.models import Project, PhotoItem
 from loupe.storage import storage
 from loupe.core.preloader import PreloadManager
+from loupe.core.vram_cache import VRAMTextureEntry
 from loupe.core.metadata import MetadataExtractor
 from loupe.ui.stats_panel import StatsPanel
 from loupe.ui.not_accepted_dialog import NotAcceptedDialog
@@ -120,13 +133,137 @@ class QuotaToastBanner(QFrame):
         self.fade_anim.start()
 
 
+def _is_gl_platform_supported() -> bool:
+    """Return True when Qt OpenGL widget rendering is safe and supported on the active platform."""
+    if not _HAS_QT_OPENGL or QOpenGLWidget is None or QOpenGLContext is None:
+        return False
+    env_plat = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
+    if env_plat in ("offscreen", "minimal", "vnc"):
+        return False
+    try:
+        plat = QGuiApplication.platformName().strip().lower()
+        if plat in ("offscreen", "minimal", "vnc"):
+            return False
+    except Exception:
+        return False
+    return True
+
+
+class VRAMTextureGraphicsItem(QGraphicsItem):
+    """QGraphicsItem rendering a GPU-resident VRAMTextureEntry via QOpenGLTextureBlitter with software fallback."""
+
+    def __init__(self, entry: VRAMTextureEntry, blitter_getter=None, parent=None):
+        super().__init__(parent)
+        self._entry = entry
+        self._blitter_getter = blitter_getter
+        self._bounds = QRectF(0.0, 0.0, float(max(1, entry.width)), float(max(1, entry.height)))
+
+    def boundingRect(self) -> QRectF:
+        return self._bounds
+
+    def paint(self, painter: QPainter, option, widget=None):
+        entry = self._entry
+        tex = entry.texture
+        if (
+            tex is not None
+            and QOpenGLContext is not None
+            and QOpenGLTextureBlitter is not None
+            and QOpenGLContext.currentContext() is not None
+        ):
+            try:
+                if tex.isCreated():
+                    target_rect = painter.worldTransform().mapRect(self._bounds)
+                    if widget is not None:
+                        vp_rect = widget.rect()
+                    else:
+                        dev = painter.device()
+                        dpr = max(1.0, float(dev.devicePixelRatioF())) if hasattr(dev, "devicePixelRatioF") else 1.0
+                        vp_rect = QRect(0, 0, max(1, int(dev.width() / dpr)), max(1, int(dev.height() / dpr)))
+                    target_xform = QOpenGLTextureBlitter.targetTransform(target_rect, vp_rect)
+                    blitter = self._blitter_getter() if self._blitter_getter else None
+                    if blitter is not None:
+                        painter.beginNativePainting()
+                        try:
+                            if not blitter.isCreated():
+                                blitter.create()
+                            if blitter.isCreated():
+                                blitter.bind(tex.target())
+                                blitter.blit(
+                                    tex.textureId(),
+                                    target_xform,
+                                    QOpenGLTextureBlitter.Origin.OriginTopLeft,
+                                )
+                                blitter.release()
+                                return
+                        finally:
+                            painter.endNativePainting()
+            except Exception:
+                pass
+
+        if entry.fallback_qimage is not None and not entry.fallback_qimage.isNull():
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawImage(self._bounds, entry.fallback_qimage)
+
+
+if _HAS_QT_OPENGL and QOpenGLWidget is not None:
+    class _PhotoGLViewport(QOpenGLWidget):
+        """OpenGL viewport widget for PhotoCanvas with managed QOpenGLTextureBlitter lifecycle."""
+        gl_initialized = Signal(object, object)  # QOpenGLContext, QSurface
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._blitter: Optional[QOpenGLTextureBlitter] = None
+
+        def initializeGL(self):
+            ctx = self.context()
+            if ctx is None or not ctx.isValid():
+                return
+            if self._blitter is None and QOpenGLTextureBlitter is not None:
+                self._blitter = QOpenGLTextureBlitter()
+                self._blitter.create()
+            try:
+                ctx.aboutToBeDestroyed.connect(self._destroy_blitter)
+            except Exception:
+                pass
+            self.gl_initialized.emit(ctx, ctx.surface())
+
+        def get_blitter(self):
+            if self._blitter is None and QOpenGLTextureBlitter is not None:
+                self._blitter = QOpenGLTextureBlitter()
+            return self._blitter
+
+        def _destroy_blitter(self):
+            if self._blitter is not None:
+                try:
+                    if self._blitter.isCreated():
+                        self._blitter.destroy()
+                except Exception:
+                    pass
+                self._blitter = None
+else:
+    _PhotoGLViewport = None  # type: ignore
+
+
 class PhotoCanvas(QGraphicsView):
-    """High-performance graphics view with smooth wheel zoom, panning, fit-to-window, and 100% actual pixels."""
+    """High-performance graphics view with OpenGL viewport (when available), smooth zoom/pan, and VRAM/RAM rendering."""
+    gl_context_ready = Signal(object, object)  # QOpenGLContext, QSurface
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.pixmap_item: Optional[QGraphicsPixmapItem] = None
+        self.vram_item: Optional[VRAMTextureGraphicsItem] = None
+        self._gl_viewport = None
+
+        if _is_gl_platform_supported() and _PhotoGLViewport is not None:
+            try:
+                gl_vp = _PhotoGLViewport(self)
+                gl_vp.gl_initialized.connect(self.gl_context_ready.emit)
+                self.setViewport(gl_vp)
+                self._gl_viewport = gl_vp
+            except Exception:
+                self._gl_viewport = None
 
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -137,41 +274,97 @@ class PhotoCanvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet("background-color: #0E0F11; border: none;")
 
+    @property
+    def is_gl_active(self) -> bool:
+        if self._gl_viewport is None:
+            return False
+        try:
+            ctx = self._gl_viewport.context()
+            return bool(self._gl_viewport.isValid() and ctx is not None and ctx.isValid())
+        except Exception:
+            return False
+
+    def get_gl_context_and_surface(self) -> Tuple[Optional[object], Optional[object]]:
+        if self._gl_viewport is None:
+            return None, None
+        try:
+            ctx = self._gl_viewport.context()
+            if ctx is not None and ctx.isValid():
+                return ctx, ctx.surface()
+        except Exception:
+            pass
+        return None, None
+
+    def _get_gl_blitter(self):
+        if self._gl_viewport is not None:
+            return self._gl_viewport.get_blitter()
+        return None
+
+    def _active_item(self) -> Optional[QGraphicsItem]:
+        if self.pixmap_item is not None and not self.pixmap_item.pixmap().isNull():
+            return self.pixmap_item
+        if self.vram_item is not None:
+            return self.vram_item
+        return None
+
     def clear(self):
-        """Purge any current pixmap item and clear the scene completely."""
+        """Purge any current pixmap/VRAM item and clear the scene completely."""
         self.scene.clear()
         self.pixmap_item = None
+        self.vram_item = None
         self.resetTransform()
+
+    def _apply_initial_view(self, width: int, height: int, start_zoomed_in: bool, zoom_level: float):
+        if start_zoomed_in:
+            self.resetTransform()
+            self.scale(zoom_level, zoom_level)
+            target_pt = QPointF(width * 0.2, height * 0.2)
+            self.centerOn(target_pt)
+        else:
+            self.fit_to_window()
 
     def set_image(self, qimage: QImage, start_zoomed_in: bool = False, zoom_level: float = 2.0):
         self.scene.clear()
-        if qimage.isNull():
+        self.pixmap_item = None
+        self.vram_item = None
+        if qimage is None or qimage.isNull():
             return
 
         pix = QPixmap.fromImage(qimage)
         self.pixmap_item = self.scene.addPixmap(pix)
         self.scene.setSceneRect(QRectF(pix.rect()))
+        self._apply_initial_view(pix.width(), pix.height(), start_zoomed_in, zoom_level)
 
-        if start_zoomed_in:
-            # Open at set zoom level focused on top-left
-            self.resetTransform()
-            self.scale(zoom_level, zoom_level)
-            # Center near top-left quadrant
-            target_pt = QPointF(pix.width() * 0.2, pix.height() * 0.2)
-            self.centerOn(target_pt)
-        else:
-            self.fit_to_window()
+    def set_vram_entry(self, entry: Optional[VRAMTextureEntry], start_zoomed_in: bool = False, zoom_level: float = 2.0):
+        """Display a GPU-resident VRAMTextureEntry (or fall back seamlessly to its QImage)."""
+        self.scene.clear()
+        self.pixmap_item = None
+        self.vram_item = None
+        if entry is None:
+            return
+
+        if entry.texture is not None and self.is_gl_active:
+            self.vram_item = VRAMTextureGraphicsItem(entry, blitter_getter=self._get_gl_blitter)
+            self.scene.addItem(self.vram_item)
+            self.scene.setSceneRect(QRectF(0.0, 0.0, float(entry.width), float(entry.height)))
+            self._apply_initial_view(entry.width, entry.height, start_zoomed_in, zoom_level)
+            return
+
+        if entry.fallback_qimage is not None and not entry.fallback_qimage.isNull():
+            self.set_image(entry.fallback_qimage, start_zoomed_in=start_zoomed_in, zoom_level=zoom_level)
 
     def fit_to_window(self):
-        if self.pixmap_item and not self.pixmap_item.pixmap().isNull():
+        item = self._active_item()
+        if item is not None:
             self.resetTransform()
-            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+            self.fitInView(item, Qt.KeepAspectRatio)
 
     def actual_pixels(self):
         """100% 1:1 view."""
-        if self.pixmap_item and not self.pixmap_item.pixmap().isNull():
+        item = self._active_item()
+        if item is not None:
             self.resetTransform()
-            self.centerOn(self.pixmap_item)
+            self.centerOn(item)
 
     def wheelEvent(self, event: QWheelEvent):
         zoom_in_factor = 1.15
@@ -194,16 +387,29 @@ class ReviewView(QWidget):
         self.preload_manager.image_ready.connect(self._on_image_ready)
         self.preload_manager.batch_progress.connect(self._on_preload_progress)
         self.preload_manager.batch_completed.connect(self._on_preload_batch_completed)
+        self.preload_manager.cache_stats_changed.connect(self._on_cache_stats_changed)
 
         self.preload_overlay = PreloadOverlay(self)
         self.preload_overlay.afk_requested.connect(self._on_afk_requested)
+        self.preload_overlay.sort_now_requested.connect(self._on_sort_now_requested)
         self.is_afk_mode = False
         self.is_preloading_paused = False
+        self._paused_for_jump = False
+        self._pause_span_start = 0
+        self._pause_span_end = 0
         self.target_nav_index: Optional[int] = None
         self.undo_stack: List[tuple] = []  # (index, old_status)
         self.is_inspecting_raw = False
 
+        self._latest_speed_mb_s: float = 0.0
+        self._last_ram_used_mb: int = 0
+        self._last_vram_used_mb: int = 0
+        self._last_total_cached: int = 0
+        self._last_vram_count: int = 0
+        self._last_ram_count: int = 0
+
         self._init_ui()
+        self.canvas.gl_context_ready.connect(self._on_canvas_gl_ready)
         self.setFocusPolicy(Qt.StrongFocus)
 
     def _init_ui(self):
@@ -250,6 +456,12 @@ class ReviewView(QWidget):
         top_layout.addLayout(proj_info_layout)
 
         top_layout.addStretch()
+
+        # Non-blocking Background Buffer Status Pill
+        self.buffer_status_lbl = QLabel("")
+        self.buffer_status_lbl.setFont(get_mono_font(10, bold=True))
+        self.buffer_status_lbl.setVisible(False)
+        top_layout.addWidget(self.buffer_status_lbl)
 
         # Match Mode Quota Badge & Toast
         self.quota_toast = QuotaToastBanner(self)
@@ -428,9 +640,77 @@ class ReviewView(QWidget):
         self.keep_btn.setText(f"Keep Photo ({keep_key})")
         self.next_btn.setText(f"Next ({next_key})")
 
+    def _on_canvas_gl_ready(self, gl_ctx, gl_surf):
+        self.preload_manager.set_gl_context(gl_ctx, gl_surf)
+
+    @staticmethod
+    def _format_mem_mb(val_mb: int) -> str:
+        if val_mb >= 1024:
+            return f"{val_mb / 1024.0:.1f} GB"
+        return f"{max(0, int(val_mb))} MB"
+
+    def _on_cache_stats_changed(
+        self,
+        ram_used_mb: int,
+        vram_used_mb: int,
+        total_cached: int,
+        vram_count: int,
+        ram_count: int,
+    ):
+        self._last_ram_used_mb = ram_used_mb
+        self._last_vram_used_mb = vram_used_mb
+        self._last_total_cached = total_cached
+        self._last_vram_count = vram_count
+        self._last_ram_count = ram_count
+        self._update_buffer_status_pill()
+
+    def _update_buffer_status_pill(self):
+        if not self.project or not self.project.items:
+            self.buffer_status_lbl.setVisible(False)
+            self.buffer_status_lbl.setText("")
+            return
+
+        self.buffer_status_lbl.setVisible(True)
+        total_items = len(self.project.items)
+        cached_count = self.preload_manager.get_ready_count()
+        mode = (getattr(self.project, "memory_mode", "ram") or "ram").lower()
+
+        if mode == "vram":
+            mem_str = f"VRAM {self._format_mem_mb(self._last_vram_used_mb)}"
+        elif mode == "mixed":
+            mem_str = f"VRAM {self._format_mem_mb(self._last_vram_used_mb)} + RAM {self._format_mem_mb(self._last_ram_used_mb)}"
+        else:
+            mem_str = f"RAM {self._format_mem_mb(self._last_ram_used_mb)}"
+
+        is_streaming = bool(getattr(self.preload_manager, "is_streaming", False))
+        if not is_streaming and cached_count >= min(total_items, self.project.batch_size):
+            self.buffer_status_lbl.setText(f"✓ Buffered {cached_count}/{total_items} • {mem_str}")
+            self.buffer_status_lbl.setStyleSheet(f"""
+                background-color: #0D2B20;
+                color: #34D399;
+                border: 1px solid #059669;
+                padding: 4px 10px;
+                border-radius: 4px;
+            """)
+        else:
+            speed_str = f" • {self._latest_speed_mb_s:.0f} MB/s" if self._latest_speed_mb_s > 0 else ""
+            self.buffer_status_lbl.setText(f"Buffer: {cached_count}/{total_items} • {mem_str}{speed_str}")
+            self.buffer_status_lbl.setStyleSheet(f"""
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                padding: 4px 10px;
+                border-radius: 4px;
+            """)
+
     def _on_start_zoomed_changed(self, enabled: bool, zoom_level: float):
         if self.project and self.project.items:
-            qimg = self.preload_manager.get_image(self.project.current_index)
+            idx = self.project.current_index
+            vram_entry = self.preload_manager.get_vram_entry(idx)
+            if vram_entry is not None:
+                self.canvas.set_vram_entry(vram_entry, start_zoomed_in=enabled, zoom_level=zoom_level)
+                return
+            qimg = self.preload_manager.get_image(idx)
             if qimg and not qimg.isNull():
                 self.canvas.set_image(qimg, start_zoomed_in=enabled, zoom_level=zoom_level)
 
@@ -438,12 +718,23 @@ class ReviewView(QWidget):
         """Completely unload active session and purge all cached buffers and display items."""
         if self.project:
             storage.save_project(self.project)
+        self.project = None
         self.preload_manager.cleanup()
         self.canvas.clear()
-        self.project = None
         self.target_nav_index = None
         self.is_preloading_paused = False
+        self._paused_for_jump = False
+        self._pause_span_start = 0
+        self._pause_span_end = 0
+        self._latest_speed_mb_s = 0.0
+        self._last_ram_used_mb = 0
+        self._last_vram_used_mb = 0
+        self._last_total_cached = 0
+        self._last_vram_count = 0
+        self._last_ram_count = 0
         self.preload_overlay.hide()
+        self.buffer_status_lbl.setVisible(False)
+        self.buffer_status_lbl.setText("")
         self.undo_stack.clear()
         self.project_title_lbl.setText("")
         self.counter_lbl.setText("0 of 0")
@@ -476,39 +767,87 @@ class ReviewView(QWidget):
         self.stats_panel.start_zoomed_cb.blockSignals(False)
         self.stats_panel.zoom_slider.blockSignals(False)
 
-        # Initialize preloader
+        # Initialize preloader with 3-tier RAM / VRAM / Mixed capacity math
         start_idx = max(0, min(project.current_index, len(project.items) - 1)) if project.items else 0
+        memory_mode = (getattr(project, "memory_mode", "ram") or "ram").strip().lower()
+        if memory_mode not in ("ram", "vram", "mixed"):
+            memory_mode = "ram"
         ram_mb = getattr(project, "ram_allocation_mb", 2048) or 2048
-        calc_from_ram = max(4, int(ram_mb / 75))
-        effective_batch_size = max(getattr(project, "batch_size", 16), calc_from_ram)
+        vram_mb = getattr(project, "vram_allocation_mb", 0) or 0
+        avg_photo_mb = 18 if getattr(project, "preview_mode", "raw") == "jpeg" else 75
+
+        if memory_mode == "vram":
+            calc_capacity = max(4, int(vram_mb / avg_photo_mb)) if vram_mb > 0 else max(4, int(ram_mb / avg_photo_mb))
+        elif memory_mode == "mixed":
+            ram_cap = max(4, int(ram_mb / avg_photo_mb))
+            vram_cap = max(0, int(vram_mb / avg_photo_mb))
+            calc_capacity = max(4, ram_cap + vram_cap)
+        else:
+            calc_capacity = max(4, int(ram_mb / avg_photo_mb))
+
+        effective_batch_size = max(getattr(project, "batch_size", 16), calc_capacity)
         project.batch_size = effective_batch_size
 
+        gl_ctx, gl_surf = self.canvas.get_gl_context_and_surface()
         self.preload_manager.initialize_session(
             project.items,
             effective_batch_size,
             start_idx,
-            ram_allocation_mb=ram_mb
+            ram_allocation_mb=ram_mb,
+            memory_mode=memory_mode,
+            vram_allocation_mb=vram_mb,
+            avg_photo_mb=avg_photo_mb,
+            gl_context=gl_ctx,
+            gl_surface=gl_surf,
         )
 
         # Immediately update labels & metadata for the loaded session
         self._display_current_photo()
+        self._update_buffer_status_pill()
 
         # Initial preload batch
         if project.items:
             batch_id = start_idx // project.batch_size
             b_start = batch_id * project.batch_size
             b_end = min(len(project.items) - 1, b_start + project.batch_size - 1)
-            
-            # Show pause overlay for initial load
+
+            # Show pause overlay for initial load (unlocks Sort Now at min(10, batch_count))
             self.is_preloading_paused = True
+            self._paused_for_jump = False
+            self._pause_span_start = b_start
+            self._pause_span_end = b_end
             self.target_nav_index = start_idx
-            self.preload_overlay.set_batch_info(b_start, b_end, start_idx, total_items=len(project.items))
+            self.preload_overlay.set_batch_info(
+                b_start,
+                b_end,
+                start_idx,
+                total_items=len(project.items),
+                memory_mode=memory_mode,
+            )
             self.preload_overlay.show()
-            self.preload_manager.request_batch(batch_id, list(range(b_start, b_end + 1)))
+            self.preload_manager.request_batch(batch_id, list(range(b_start, b_end + 1)), priority_index=start_idx)
 
     def _on_preload_progress(self, completed: int, total: int, speed: float, eta: float, fname: str):
+        self._latest_speed_mb_s = speed
+        self._update_buffer_status_pill()
         if self.is_preloading_paused:
-            self.preload_overlay.update_progress(completed, total, speed, eta, fname)
+            if self._paused_for_jump and self.project:
+                span_ready = self.preload_manager.get_ready_count(self._pause_span_start, self._pause_span_end)
+                span_total = max(1, self._pause_span_end - self._pause_span_start + 1)
+                self.preload_overlay.update_progress(span_ready, span_total, speed, eta, fname)
+            else:
+                self.preload_overlay.update_progress(completed, total, speed, eta, fname)
+
+    def _on_sort_now_requested(self):
+        """Dismiss loading overlay early and begin culling while PreloadWorker streams remaining photos."""
+        self.is_preloading_paused = False
+        self._paused_for_jump = False
+        self.preload_overlay.hide()
+        if self.target_nav_index is not None and self.project:
+            self.project.current_index = self.target_nav_index
+            self.target_nav_index = None
+        self._display_current_photo()
+        self._update_buffer_status_pill()
 
     def _on_afk_requested(self):
         self.is_afk_mode = True
@@ -517,8 +856,10 @@ class ReviewView(QWidget):
             w.showMinimized()
 
     def _on_preload_batch_completed(self, batch_id: int):
+        self._update_buffer_status_pill()
         if self.is_preloading_paused:
             self.is_preloading_paused = False
+            self._paused_for_jump = False
             self.preload_overlay.hide()
             if getattr(self, "is_afk_mode", False):
                 self.is_afk_mode = False
@@ -539,7 +880,11 @@ class ReviewView(QWidget):
 
     def _on_image_ready(self, index: int, qimg: QImage):
         if self.project and index == self.project.current_index:
-            self._render_image(qimg)
+            vram_entry = self.preload_manager.get_vram_entry(index)
+            if vram_entry is not None:
+                self._render_vram_entry(vram_entry)
+            else:
+                self._render_image(qimg)
 
     def _display_current_photo(self):
         if not self.project or not self.project.items:
@@ -692,12 +1037,24 @@ class ReviewView(QWidget):
             item.metadata = MetadataExtractor.extract(item.primary_path)
         self.stats_panel.update_metadata(item.metadata)
 
-        # Render cached image if available, else clear canvas
+        # Render cached image or VRAM texture if available, else clear canvas
+        self._render_cached_index(idx)
+
+    def _render_cached_index(self, idx: int):
+        vram_entry = self.preload_manager.get_vram_entry(idx)
+        if vram_entry is not None:
+            self._render_vram_entry(vram_entry)
+            return
         qimg = self.preload_manager.get_image(idx)
         if qimg and not qimg.isNull():
             self._render_image(qimg)
         else:
             self.canvas.clear()
+
+    def _render_vram_entry(self, entry: VRAMTextureEntry):
+        start_zoom = config.get("start_zoomed_in", False)
+        zoom_lvl = config.get("zoom_start_level", 2.0)
+        self.canvas.set_vram_entry(entry, start_zoomed_in=start_zoom, zoom_level=zoom_lvl)
 
     def _render_image(self, qimg: QImage):
         start_zoom = config.get("start_zoomed_in", False)
@@ -717,15 +1074,59 @@ class ReviewView(QWidget):
         # Reset on-demand raw inspection on new frame navigation
         self.is_inspecting_raw = False
 
-        # Check if navigating requires a batch pause
-        needs_pause, b_start, b_end = self.preload_manager.check_navigation(target_idx, direction)
-        if needs_pause:
-            self.is_preloading_paused = True
-            self.target_nav_index = target_idx
-            self.preload_overlay.set_batch_info(b_start, b_end, target_idx, total_items=len(self.project.items))
-            self.preload_overlay.show()
-        else:
+        total_items = len(self.project.items)
+        memory_mode = (getattr(self.project, "memory_mode", "ram") or "ram").lower()
+
+        if self.preload_manager.is_cached(target_idx):
+            # Target frame is already ready: enter immediately without pausing
+            self.is_preloading_paused = False
+            self._paused_for_jump = False
+            self.preload_overlay.hide()
+
+            if self.preload_manager.is_streaming:
+                step = 1 if direction >= 0 else -1
+                lookahead = [
+                    target_idx + offset * step
+                    for offset in range(10)
+                    if 0 <= target_idx + offset * step < total_items
+                ]
+                if any(not self.preload_manager.is_cached(i) for i in lookahead):
+                    self.preload_manager.reprioritize_around(target_idx, direction)
+            else:
+                self.preload_manager.check_navigation(target_idx, direction)
+
             self._display_current_photo()
+            return
+
+        # Target frame is NOT cached yet: reprioritize [target_idx .. target_idx+9] and pause
+        if self.preload_manager.is_streaming:
+            self.preload_manager.reprioritize_around(target_idx, direction)
+            batch_id = target_idx // self.project.batch_size
+            b_start = batch_id * self.project.batch_size
+            b_end = min(total_items - 1, b_start + self.project.batch_size - 1)
+        else:
+            _, b_start, b_end = self.preload_manager.check_navigation(target_idx, direction)
+
+        if direction >= 0:
+            span_start = target_idx
+            span_end = min(total_items - 1, max(b_end, target_idx))
+        else:
+            span_start = max(0, b_start)
+            span_end = target_idx
+
+        self.is_preloading_paused = True
+        self._paused_for_jump = True
+        self._pause_span_start = span_start
+        self._pause_span_end = span_end
+        self.target_nav_index = target_idx
+        self.preload_overlay.set_batch_info(
+            span_start,
+            span_end,
+            target_idx,
+            total_items=total_items,
+            memory_mode=memory_mode,
+        )
+        self.preload_overlay.show()
 
     def go_next(self):
         if self.project and self.project.current_index < len(self.project.items) - 1:
@@ -903,11 +1304,7 @@ class ReviewView(QWidget):
                     color: {COLOR_ACCENT};
                 }}
             """)
-            qimg = self.preload_manager.get_image(idx)
-            if qimg and not qimg.isNull():
-                self._render_image(qimg)
-            else:
-                self.canvas.clear()
+            self._render_cached_index(idx)
         else:
             # Decode RAW on demand
             qimg, _ = ImageDecoder.decode_to_qimage(item.raw_path)

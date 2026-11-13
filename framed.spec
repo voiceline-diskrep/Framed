@@ -24,6 +24,8 @@ a = Analysis(
         'cv2',
         'PySide6.QtMultimedia',
         'PySide6.QtMultimediaWidgets',
+        'PySide6.QtOpenGL',
+        'PySide6.QtOpenGLWidgets',
     ],
     hookspath=[],
     hooksconfig={},

@@ -65,7 +65,9 @@ class Project:
     source_dir: str = ""
     format_mode: str = "both"  # "raw_only", "jpeg_only", "both"
     sync_pairs: bool = True
+    memory_mode: str = "ram"  # "ram", "vram", "mixed"
     ram_allocation_mb: int = 2048
+    vram_allocation_mb: int = 0
     batch_size: int = 16
     shoot_date: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())

@@ -12,6 +12,7 @@ from loupe.config import config, get_total_system_ram_gb
 from loupe.storage import storage
 from loupe.models import Project, PhotoItem, Folder
 from loupe.core.decoder import RAW_EXTENSIONS, JPEG_EXTENSIONS
+from loupe.core.gpu_info import detect_gpu_vram, GPUInfo
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS, COLOR_TEXT_PRIMARY,
@@ -35,9 +36,11 @@ class SessionSetupView(QWidget):
         self.total_bytes_scanned: int = 0
         self.created_project: Optional[Project] = None
         self.calculated_batch_size: int = 16
+        self.gpu_info: GPUInfo = detect_gpu_vram()
 
         self._init_ui()
         self._update_format_visibility()
+        self._update_memory_mode_ui()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -441,7 +444,7 @@ class SessionSetupView(QWidget):
 
         center_layout.addWidget(self.sec_match_mode)
 
-        # Section 6: RAM Budget & Preloading
+        # Section 6: Memory Buffer & Preloading Budget (RAM / VRAM / Mixed)
         sec4 = self._create_card()
         sec4_layout = QVBoxLayout(sec4)
         sec4_layout.setSpacing(12)
@@ -452,40 +455,104 @@ class SessionSetupView(QWidget):
         sec4_layout.addWidget(sec4_title)
 
         total_sys_gb = get_total_system_ram_gb()
-        ram_expl = QLabel(
-            "Preloading decodes full-resolution photos into RAM in advance so moving between photos has zero lag. "
-            f"The more RAM you allocate, the more photos Framed keeps in memory without needing to reload (System RAM: {total_sys_gb} GB)."
+        gpu_summary = (
+            f"{self.gpu_info.name} — {self._format_ram_mb(self.gpu_info.total_vram_mb)}"
+            if self.gpu_info.total_vram_mb > 0
+            else "No dedicated GPU detected (Software fallback)"
         )
-        ram_expl.setFont(get_body_font(12))
-        ram_expl.setWordWrap(True)
-        ram_expl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
-        sec4_layout.addWidget(ram_expl)
+        self.hw_info_lbl = QLabel(
+            f"Preloading decodes photos into memory in advance for zero-lag culling. "
+            f"Detected Hardware — System RAM: {total_sys_gb} GB • GPU VRAM: {gpu_summary}."
+        )
+        self.hw_info_lbl.setFont(get_body_font(12))
+        self.hw_info_lbl.setWordWrap(True)
+        self.hw_info_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        sec4_layout.addWidget(self.hw_info_lbl)
+
+        # 3-Mode Memory Allocation Target Selector
+        mode_lbl = QLabel("Memory Allocation Target:")
+        mode_lbl.setFont(get_body_font(12, bold=True))
+        mode_lbl.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")
+        sec4_layout.addWidget(mode_lbl)
+
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        self.memory_mode_group = QButtonGroup(self)
+        self.memory_mode_group.setExclusive(True)
+        self._memory_mode_buttons: Dict[str, QPushButton] = {}
+
+        mode_btn_style = f"""
+            QPushButton {{
+                background-color: {COLOR_BG_ELEVATED};
+                color: {COLOR_TEXT_SECONDARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 8px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:checked {{
+                background-color: {COLOR_ACCENT};
+                color: #FFFFFF;
+                border: 1px solid {COLOR_ACCENT};
+            }}
+        """
+        for idx, (mode_key, mode_label) in enumerate(
+            (("ram", "RAM"), ("vram", "VRAM (GPU)"), ("mixed", "Mixed (RAM + VRAM)")), start=1
+        ):
+            btn = QPushButton(mode_label)
+            btn.setCheckable(True)
+            btn.setFont(get_body_font(12, bold=True))
+            btn.setStyleSheet(mode_btn_style)
+            self.memory_mode_group.addButton(btn, idx)
+            self._memory_mode_buttons[mode_key] = btn
+            mode_row.addWidget(btn, stretch=1)
+
+        self.btn_mode_ram = self._memory_mode_buttons["ram"]
+        self.btn_mode_vram = self._memory_mode_buttons["vram"]
+        self.btn_mode_mixed = self._memory_mode_buttons["mixed"]
+
+        default_mode = str(config.get("default_memory_mode", "ram")).lower()
+        if default_mode not in self._memory_mode_buttons:
+            default_mode = "ram"
+        self._memory_mode_buttons[default_mode].setChecked(True)
+        self.memory_mode_group.idToggled.connect(self._on_memory_mode_toggled)
+        sec4_layout.addLayout(mode_row)
 
         # RAM slider row
-        slider_row = QHBoxLayout()
-        slider_row.setSpacing(16)
-
         max_slider_mb = max(16384, total_sys_gb * 1024)
-        default_ram_mb = min(config.get("ram_budget_gb", 16) * 1024, max_slider_mb)
+        default_ram_mb = max(512, min(config.get("ram_budget_gb", 16) * 1024, max_slider_mb))
+        self.ram_row_widget, self.ram_slider, self.ram_val_lbl = self._build_memory_slider_row(
+            label_text="System RAM:",
+            min_mb=512,
+            max_mb=max_slider_mb,
+            step_mb=512,
+            page_mb=2048,
+            initial_mb=default_ram_mb,
+            on_change=self._on_ram_slider_changed,
+        )
+        sec4_layout.addWidget(self.ram_row_widget)
 
-        self.ram_slider = QSlider(Qt.Horizontal)
-        self.ram_slider.setRange(512, max_slider_mb)
-        self.ram_slider.setSingleStep(512)
-        self.ram_slider.setPageStep(2048)
-        self.ram_slider.setValue(default_ram_mb)
-        self.ram_slider.valueChanged.connect(self._on_ram_slider_changed)
-        slider_row.addWidget(self.ram_slider, stretch=1)
-
-        self.ram_val_lbl = QLabel(self._format_ram_mb(default_ram_mb))
-        self.ram_val_lbl.setFont(get_mono_font(12, bold=True))
-        self.ram_val_lbl.setFixedWidth(160)
-        self.ram_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        slider_row.addWidget(self.ram_val_lbl)
-
-        sec4_layout.addLayout(slider_row)
+        # VRAM slider row
+        max_vram_mb = max(2048, self.gpu_info.total_vram_mb)
+        default_vram_mb = max(512, min(int(config.get("vram_budget_gb", 1)) * 1024, max_vram_mb))
+        self.vram_row_widget, self.vram_slider, self.vram_val_lbl = self._build_memory_slider_row(
+            label_text="GPU VRAM:",
+            min_mb=512,
+            max_mb=max_vram_mb,
+            step_mb=512,
+            page_mb=1024,
+            initial_mb=default_vram_mb,
+            on_change=self._on_vram_slider_changed,
+        )
+        sec4_layout.addWidget(self.vram_row_widget)
 
         self.batch_calc_lbl = QLabel("")
         self.batch_calc_lbl.setFont(get_mono_font(11))
+        self.batch_calc_lbl.setWordWrap(True)
         self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
         self._update_batch_calc(default_ram_mb)
         sec4_layout.addWidget(self.batch_calc_lbl)
@@ -581,6 +648,73 @@ class SessionSetupView(QWidget):
         """)
         return frame
 
+    def _build_memory_slider_row(
+        self,
+        label_text: str,
+        min_mb: int,
+        max_mb: int,
+        step_mb: int,
+        page_mb: int,
+        initial_mb: int,
+        on_change,
+    ):
+        """Create a labeled horizontal memory budget slider row with monospace value display."""
+        row_widget = QWidget()
+        row_widget.setStyleSheet("background: transparent;")
+        slider_row = QHBoxLayout(row_widget)
+        slider_row.setContentsMargins(0, 0, 0, 0)
+        slider_row.setSpacing(16)
+
+        row_lbl = QLabel(label_text)
+        row_lbl.setFont(get_body_font(12, bold=True))
+        row_lbl.setFixedWidth(96)
+        row_lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        slider_row.addWidget(row_lbl)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(min_mb, max_mb)
+        slider.setSingleStep(step_mb)
+        slider.setPageStep(page_mb)
+        slider.setValue(max(min_mb, min(initial_mb, max_mb)))
+        slider.valueChanged.connect(on_change)
+        slider_row.addWidget(slider, stretch=1)
+
+        val_lbl = QLabel(self._format_ram_mb(slider.value()))
+        val_lbl.setFont(get_mono_font(12, bold=True))
+        val_lbl.setFixedWidth(160)
+        val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        slider_row.addWidget(val_lbl)
+
+        return row_widget, slider, val_lbl
+
+    def _get_memory_mode(self) -> str:
+        """Return currently selected memory target ('ram', 'vram', or 'mixed')."""
+        for mode_key, btn in self._memory_mode_buttons.items():
+            if btn.isChecked():
+                return mode_key
+        return "ram"
+
+    def set_memory_mode(self, mode: str) -> None:
+        """Select a memory allocation target ('ram', 'vram', or 'mixed') and refresh UI."""
+        normalized = str(mode or "ram").lower()
+        if normalized not in self._memory_mode_buttons:
+            normalized = "ram"
+        btn = self._memory_mode_buttons[normalized]
+        if not btn.isChecked():
+            btn.setChecked(True)
+        self._update_memory_mode_ui()
+        self._update_batch_calc()
+
+    def _on_memory_mode_toggled(self, _button_id: int, checked: bool) -> None:
+        if checked:
+            self._update_memory_mode_ui()
+            self._update_batch_calc()
+
+    def _update_memory_mode_ui(self) -> None:
+        mode = self._get_memory_mode()
+        self.ram_row_widget.setVisible(mode in ("ram", "mixed"))
+        self.vram_row_widget.setVisible(mode in ("vram", "mixed"))
+
     def _populate_folders(self):
         self.folder_combo.clear()
         folders_with_depth = storage.get_folders_with_depth()
@@ -596,8 +730,7 @@ class SessionSetupView(QWidget):
         is_jpeg = self.rb_preview_jpeg.isChecked()
         self.cb_link_to_raw.setEnabled(is_jpeg)
         self._rescan_items()
-        ram_alloc = self.ram_slider.value()
-        self._update_batch_calc(ram_alloc)
+        self._update_batch_calc()
 
     def _on_match_mode_toggled(self, checked: bool):
         self.match_limit_container.setVisible(checked)
@@ -742,21 +875,7 @@ class SessionSetupView(QWidget):
         self.scan_status_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT if count > 0 else COLOR_STATUS_REJECTED};")
         self.start_btn.setEnabled(count > 0)
 
-        global_budget_mb = config.get("ram_budget_gb", 16) * 1024
-        total_sys_gb = get_total_system_ram_gb()
-        max_slider_mb = max(16384, total_sys_gb * 1024)
-
-        # Allocate enough RAM to hold scanned photos uncompressed without reload pauses
-        needed_ram_mb = max(1024, count * 75)
-        rec_ram_mb = min(needed_ram_mb, max(2048, global_budget_mb))
-        rec_ram_mb = max(512, min(rec_ram_mb, max_slider_mb))
-
-        self.ram_slider.blockSignals(True)
-        self.ram_slider.setRange(512, max_slider_mb)
-        self.ram_slider.setValue(rec_ram_mb)
-        self.ram_val_lbl.setText(self._format_ram_mb(rec_ram_mb))
-        self.ram_slider.blockSignals(False)
-        self._update_batch_calc(rec_ram_mb)
+        self._calibrate_memory_sliders(count=count)
 
     @staticmethod
     def _format_ram_mb(val_mb: int) -> str:
@@ -767,41 +886,100 @@ class SessionSetupView(QWidget):
             return f"{gb:.1f} GB ({val_mb:,} MB)"
         return f"{val_mb:,} MB"
 
-    def _on_ram_slider_changed(self, val_mb: int):
-        self.ram_val_lbl.setText(self._format_ram_mb(val_mb))
-        self._update_batch_calc(val_mb)
-
-    def _update_batch_calc(self, ram_mb: int):
+    def _calibrate_memory_sliders(self, count: int = 0) -> None:
+        """Calibrate RAM and VRAM slider bounds and recommended allocations."""
         is_jpeg_preview = hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
         avg_photo_mb = 18 if is_jpeg_preview else 75
-        ram_capacity = max(4, int(ram_mb / avg_photo_mb))
-        self.calculated_batch_size = ram_capacity
+
+        total_sys_gb = get_total_system_ram_gb()
+        max_ram_mb = max(16384, total_sys_gb * 1024)
+        global_ram_mb = int(config.get("ram_budget_gb", 16)) * 1024
+        if count > 0:
+            needed_ram_mb = max(1024, count * avg_photo_mb)
+            rec_ram_mb = min(needed_ram_mb, max(2048, global_ram_mb))
+        else:
+            rec_ram_mb = global_ram_mb
+        rec_ram_mb = max(512, min(rec_ram_mb, max_ram_mb))
+
+        self.ram_slider.blockSignals(True)
+        self.ram_slider.setRange(512, max_ram_mb)
+        self.ram_slider.setValue(rec_ram_mb)
+        self.ram_val_lbl.setText(self._format_ram_mb(rec_ram_mb))
+        self.ram_slider.blockSignals(False)
+
+        max_vram_mb = max(2048, self.gpu_info.total_vram_mb)
+        global_vram_mb = max(512, int(config.get("vram_budget_gb", 1)) * 1024)
+        if count > 0:
+            needed_vram_mb = max(512, count * avg_photo_mb)
+            rec_vram_mb = min(needed_vram_mb, max(1024, global_vram_mb))
+        else:
+            rec_vram_mb = global_vram_mb
+        rec_vram_mb = max(512, min(rec_vram_mb, max_vram_mb))
+
+        self.vram_slider.blockSignals(True)
+        self.vram_slider.setRange(512, max_vram_mb)
+        self.vram_slider.setValue(rec_vram_mb)
+        self.vram_val_lbl.setText(self._format_ram_mb(rec_vram_mb))
+        self.vram_slider.blockSignals(False)
+
+        self._update_batch_calc()
+
+    def _on_ram_slider_changed(self, val_mb: int):
+        self.ram_val_lbl.setText(self._format_ram_mb(val_mb))
+        self._update_batch_calc(ram_mb=val_mb)
+
+    def _on_vram_slider_changed(self, val_mb: int):
+        self.vram_val_lbl.setText(self._format_ram_mb(val_mb))
+        self._update_batch_calc(vram_mb=val_mb)
+
+    def _update_batch_calc(
+        self,
+        ram_mb: Optional[int] = None,
+        vram_mb: Optional[int] = None,
+        memory_mode: Optional[str] = None,
+    ):
+        mode = memory_mode if memory_mode in ("ram", "vram", "mixed") else self._get_memory_mode()
+        active_ram_mb = self.ram_slider.value() if ram_mb is None else ram_mb
+        active_vram_mb = self.vram_slider.value() if vram_mb is None else vram_mb
+
+        is_jpeg_preview = hasattr(self, "rb_preview_jpeg") and self.rb_preview_jpeg.isChecked()
+        avg_photo_mb = 18 if is_jpeg_preview else 75
+
+        ram_capacity = max(4, int(active_ram_mb / avg_photo_mb)) if mode in ("ram", "mixed") else 0
+        vram_capacity = max(4, int(active_vram_mb / avg_photo_mb)) if mode in ("vram", "mixed") else 0
+        total_capacity = max(4, ram_capacity + vram_capacity)
+        self.calculated_batch_size = total_capacity
 
         count = len(self.scanned_items) if hasattr(self, "scanned_items") and self.scanned_items else 0
-        if count > 0 and ram_capacity >= count:
-            self.batch_calc_lbl.setText(
-                f"Memory buffer: {ram_capacity} photos capacity.\n"
-                f"✓ Entire session ({count} photos) will fit in RAM — instant browsing with zero reload pauses!"
-            )
-            self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
-        elif count > 0:
-            self.batch_calc_lbl.setText(
-                f"Memory buffer: {ram_capacity} photos capacity.\n"
-                f"Preloads the first {ram_capacity} photos before starting. When you reach photo {ram_capacity}, "
-                f"Framed will pause to load the next batch with live speed and ETA."
-            )
-            self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+        gpu_label = self.gpu_info.name if self.gpu_info.total_vram_mb > 0 else "GPU VRAM (Software Fallback)"
+
+        if mode == "vram":
+            headline = f"VRAM buffer: {vram_capacity} photos capacity in {gpu_label} ({self._format_ram_mb(active_vram_mb)})."
+            target_desc = "GPU VRAM"
+        elif mode == "mixed":
+            headline = f"Mixed buffer: {total_capacity} photos total ({vram_capacity} in VRAM + {ram_capacity} in RAM)."
+            target_desc = "VRAM + RAM"
         else:
-            self.batch_calc_lbl.setText(
-                f"Memory buffer: {ram_capacity} photos capacity.\n"
-                f"Holds up to {ram_capacity} full-resolution photos simultaneously in memory."
+            headline = f"Memory buffer: {ram_capacity} photos capacity in System RAM."
+            target_desc = "RAM"
+
+        if count > 0 and total_capacity >= count:
+            detail = f"✓ Entire session ({count} photos) will fit in {target_desc} — instant browsing with zero reload pauses!"
+        elif count > 0:
+            min_ready = min(10, count)
+            detail = (
+                f"Unlocks Sort Now after {min_ready} photos while streaming up to {total_capacity} photos "
+                f"in {target_desc} in the background."
             )
-            self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
+        else:
+            detail = f"Holds up to {total_capacity} full-resolution photos simultaneously in {target_desc}."
+
+        self.batch_calc_lbl.setText(f"{headline}\n{detail}")
+        self.batch_calc_lbl.setStyleSheet(f"color: {COLOR_STATUS_KEPT};")
 
     def reset_form(self):
         """Reset form fields when opening a new session."""
         self._populate_folders()
-        exp_on = bool(config.get("experimental_mode", False))
         self.gdrive_btn.setVisible(True)
         if hasattr(self, "sec_preview_engine"):
             self.sec_preview_engine.setVisible(self.rb_both.isChecked())
@@ -831,15 +1009,9 @@ class SessionSetupView(QWidget):
         self.rb_both.setChecked(True)
         self._update_format_visibility()
 
-        total_sys_gb = get_total_system_ram_gb()
-        max_slider_mb = max(16384, total_sys_gb * 1024)
-        default_ram_mb = min(config.get("ram_budget_gb", 16) * 1024, max_slider_mb)
-        self.ram_slider.blockSignals(True)
-        self.ram_slider.setRange(512, max_slider_mb)
-        self.ram_slider.setValue(default_ram_mb)
-        self.ram_val_lbl.setText(self._format_ram_mb(default_ram_mb))
-        self.ram_slider.blockSignals(False)
-        self._update_batch_calc(default_ram_mb)
+        default_mode = str(config.get("default_memory_mode", "ram")).lower()
+        self.set_memory_mode(default_mode)
+        self._calibrate_memory_sliders(count=0)
 
     def _start_session(self):
         if not self.scanned_items and self.source_dir_edit.text().strip():
@@ -853,7 +1025,9 @@ class SessionSetupView(QWidget):
         fid = self.folder_combo.currentData() or "folder_personal"
         fmt_mode = "both" if self.rb_both.isChecked() else ("raw_only" if self.rb_raw.isChecked() else "jpeg_only")
         sync_pairs = self.sync_checkbox.isChecked() if fmt_mode == "both" else False
-        ram_alloc = self.ram_slider.value()
+        memory_mode = self._get_memory_mode()
+        ram_alloc = self.ram_slider.value() if memory_mode in ("ram", "mixed") else 0
+        vram_alloc = self.vram_slider.value() if memory_mode in ("vram", "mixed") else 0
 
         is_match = bool(hasattr(self, "cb_match_mode") and self.cb_match_mode.isChecked())
         match_limit = self.sb_match_limit.value() if is_match else 0
@@ -867,7 +1041,9 @@ class SessionSetupView(QWidget):
             source_dir=self.source_dir_edit.text().strip(),
             format_mode=fmt_mode,
             sync_pairs=sync_pairs,
+            memory_mode=memory_mode,
             ram_allocation_mb=ram_alloc,
+            vram_allocation_mb=vram_alloc,
             batch_size=getattr(self, "calculated_batch_size", 16),
             shoot_date=self.date_edit.date().toString("yyyy-MM-dd"),
             items=self.scanned_items,

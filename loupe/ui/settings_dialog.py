@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QApplication, QRadioButton, QButtonGroup, QGridLayout
 )
 from PySide6.QtCore import Qt, Signal
-from loupe.config import config, get_total_system_ram_gb
+from loupe.config import config, get_total_system_ram_gb, get_total_vram_gb
+from loupe.core.gpu_info import detect_gpu_vram, GPUInfo
 from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_BORDER_FOCUS, COLOR_TEXT_PRIMARY,
@@ -58,6 +59,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Framed Preferences & Configuration")
         self.setMinimumSize(540, 360)
         self.setStyleSheet(f"background-color: {COLOR_BG_BASE};")
+        self.gpu_info: GPUInfo = detect_gpu_vram()
 
         self._init_ui()
         self._fit_to_available_screen()
@@ -176,7 +178,7 @@ class SettingsDialog(QDialog):
         l_theme.addLayout(grid_theme)
         form_layout.addWidget(card_theme)
 
-        # Section 2: RAM Budget
+        # Section 2: RAM & VRAM Memory Budgets + Default Mode
         card_ram = self._create_card()
         l_ram = QVBoxLayout(card_ram)
         l_ram.setSpacing(10)
@@ -204,6 +206,87 @@ class SettingsDialog(QDialog):
         self.ram_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         row_ram.addWidget(self.ram_val_lbl)
         l_ram.addLayout(row_ram)
+
+        t_vram = QLabel("PRELOAD VRAM BUDGET")
+        t_vram.setFont(get_mono_font(10, bold=True))
+        t_vram.setStyleSheet(f"color: {COLOR_ACCENT}; margin-top: 6px;")
+        l_ram.addWidget(t_vram)
+
+        if self.gpu_info.total_vram_mb > 0:
+            gpu_gb_str = f"{self.gpu_info.total_vram_mb / 1024.0:.1f} GB"
+            vram_desc_txt = (
+                f"Maximum GPU memory cap for VRAM/Mixed caching. "
+                f"Detected GPU: {self.gpu_info.name} ({gpu_gb_str} VRAM)."
+            )
+        else:
+            vram_desc_txt = (
+                "Maximum GPU memory cap for VRAM/Mixed caching. "
+                "No dedicated GPU detected (software fallback)."
+            )
+        desc_vram = QLabel(vram_desc_txt)
+        desc_vram.setFont(get_body_font(12))
+        desc_vram.setWordWrap(True)
+        desc_vram.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        l_ram.addWidget(desc_vram)
+
+        row_vram = QHBoxLayout()
+        max_vram_gb = max(2, get_total_vram_gb())
+        self.vram_slider = QSlider(Qt.Horizontal)
+        self.vram_slider.setRange(1, max_vram_gb)
+        self.vram_slider.valueChanged.connect(lambda v: self.vram_val_lbl.setText(f"{v} GB"))
+        row_vram.addWidget(self.vram_slider, stretch=1)
+
+        self.vram_val_lbl = QLabel("1 GB")
+        self.vram_val_lbl.setFont(get_mono_font(12, bold=True))
+        self.vram_val_lbl.setFixedWidth(60)
+        self.vram_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        row_vram.addWidget(self.vram_val_lbl)
+        l_ram.addLayout(row_vram)
+
+        t_mode = QLabel("DEFAULT MEMORY MODE")
+        t_mode.setFont(get_mono_font(10, bold=True))
+        t_mode.setStyleSheet(f"color: {COLOR_ACCENT}; margin-top: 6px;")
+        l_ram.addWidget(t_mode)
+
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        self.memory_mode_group = QButtonGroup(self)
+        self.memory_mode_group.setExclusive(True)
+        self._memory_mode_buttons = {}
+        mode_btn_style = f"""
+            QPushButton {{
+                background-color: {COLOR_BG_BASE};
+                color: {COLOR_TEXT_SECONDARY};
+                border: 1px solid {COLOR_BORDER_DISTINCT};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border-color: {COLOR_TEXT_SECONDARY};
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:checked {{
+                background-color: {COLOR_ACCENT};
+                color: #FFFFFF;
+                border: 1px solid {COLOR_ACCENT};
+            }}
+        """
+        for idx, (mode_key, mode_label) in enumerate(
+            (("ram", "RAM"), ("vram", "VRAM"), ("mixed", "Mixed")), start=1
+        ):
+            btn = QPushButton(mode_label)
+            btn.setCheckable(True)
+            btn.setFont(get_body_font(12, bold=True))
+            btn.setStyleSheet(mode_btn_style)
+            self.memory_mode_group.addButton(btn, idx)
+            self._memory_mode_buttons[mode_key] = btn
+            mode_row.addWidget(btn, stretch=1)
+
+        self.btn_mode_ram = self._memory_mode_buttons["ram"]
+        self.btn_mode_vram = self._memory_mode_buttons["vram"]
+        self.btn_mode_mixed = self._memory_mode_buttons["mixed"]
+        l_ram.addLayout(mode_row)
 
         form_layout.addWidget(card_ram)
 
@@ -539,6 +622,18 @@ class SettingsDialog(QDialog):
         if checked:
             apply_theme(theme_id)
 
+    def _get_memory_mode(self) -> str:
+        for mode_key, btn in self._memory_mode_buttons.items():
+            if btn.isChecked():
+                return mode_key
+        return "ram"
+
+    def set_memory_mode(self, mode: str) -> None:
+        normalized = str(mode or "ram").lower()
+        if normalized not in self._memory_mode_buttons:
+            normalized = "ram"
+        self._memory_mode_buttons[normalized].setChecked(True)
+
     def _load_values(self):
         saved_theme = config.get("theme", "dark_amber")
         saved_theme = THEME_ALIASES.get(saved_theme, saved_theme)
@@ -548,6 +643,12 @@ class SettingsDialog(QDialog):
         ram_gb = config.get("ram_budget_gb", 16)
         self.ram_slider.setValue(ram_gb)
         self.ram_val_lbl.setText(f"{ram_gb} GB")
+
+        vram_gb = int(config.get("vram_budget_gb", 1))
+        vram_gb = max(self.vram_slider.minimum(), min(vram_gb, self.vram_slider.maximum()))
+        self.vram_slider.setValue(vram_gb)
+        self.vram_val_lbl.setText(f"{vram_gb} GB")
+        self.set_memory_mode(config.get("default_memory_mode", "ram"))
 
         self.key_keep.setText(config.get_key_binding("keep"))
         self.key_maybe.setText(config.get_key_binding("maybe", "E"))
@@ -663,6 +764,8 @@ class SettingsDialog(QDialog):
     def _save_values(self):
         config.set("theme", current_theme_id)
         config.set("ram_budget_gb", self.ram_slider.value())
+        config.set("vram_budget_gb", self.vram_slider.value())
+        config.set("default_memory_mode", self._get_memory_mode())
         config.set_key_binding("keep", self.key_keep.text().strip() or "W")
         config.set_key_binding("maybe", self.key_maybe.text().strip() or "E")
         config.set_key_binding("reject", self.key_reject.text().strip() or "S")
