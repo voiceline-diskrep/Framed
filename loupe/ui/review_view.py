@@ -38,7 +38,7 @@ from loupe.ui.theme import (
     COLOR_BG_BASE, COLOR_BG_SURFACE, COLOR_BG_ELEVATED, COLOR_BORDER_SUBTLE,
     COLOR_BORDER_DISTINCT, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY,
     COLOR_TEXT_MUTED, COLOR_ACCENT, COLOR_STATUS_KEPT, COLOR_STATUS_REJECTED,
-    COLOR_STATUS_MAYBE, get_display_font, get_body_font, get_mono_font
+    COLOR_STATUS_MAYBE, get_display_font, get_body_font, get_mono_font, theme_manager
 )
 from loupe.ui.icons import render_icon
 
@@ -187,7 +187,9 @@ class VRAMTextureGraphicsItem(QGraphicsItem):
                             if not blitter.isCreated():
                                 blitter.create()
                             if blitter.isCreated():
-                                blitter.bind(tex.target())
+                                target = tex.target()
+                                target_gl = int(target.value) if hasattr(target, "value") else int(target)
+                                blitter.bind(target_gl)
                                 blitter.blit(
                                     tex.textureId(),
                                     target_xform,
@@ -272,8 +274,18 @@ class PhotoCanvas(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setStyleSheet("background-color: #0E0F11; border: none;")
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self._apply_canvas_background()
+        theme_manager.theme_changed.connect(self._apply_canvas_background)
 
+    def _apply_canvas_background(self, _theme_id=None):
+        import loupe.ui.theme as _theme_mod
+        bg = _theme_mod.COLOR_BG_BASE
+        brush = QBrush(QColor(bg))
+        self.setBackgroundBrush(brush)
+        self.scene.setBackgroundBrush(brush)
+        self.setStyleSheet(f"background-color: {bg}; border: none;")
+        self.viewport().update()
     @property
     def is_gl_active(self) -> bool:
         if self._gl_viewport is None:
@@ -313,7 +325,7 @@ class PhotoCanvas(QGraphicsView):
         self.pixmap_item = None
         self.vram_item = None
         self.resetTransform()
-
+        self.viewport().update()
     def _apply_initial_view(self, width: int, height: int, start_zoomed_in: bool, zoom_level: float):
         if start_zoomed_in:
             self.resetTransform()
@@ -334,7 +346,7 @@ class PhotoCanvas(QGraphicsView):
         self.pixmap_item = self.scene.addPixmap(pix)
         self.scene.setSceneRect(QRectF(pix.rect()))
         self._apply_initial_view(pix.width(), pix.height(), start_zoomed_in, zoom_level)
-
+        self.viewport().update()
     def set_vram_entry(self, entry: Optional[VRAMTextureEntry], start_zoomed_in: bool = False, zoom_level: float = 2.0):
         """Display a GPU-resident VRAMTextureEntry (or fall back seamlessly to its QImage)."""
         self.scene.clear()
@@ -348,6 +360,7 @@ class PhotoCanvas(QGraphicsView):
             self.scene.addItem(self.vram_item)
             self.scene.setSceneRect(QRectF(0.0, 0.0, float(entry.width), float(entry.height)))
             self._apply_initial_view(entry.width, entry.height, start_zoomed_in, zoom_level)
+            self.viewport().update()
             return
 
         if entry.fallback_qimage is not None and not entry.fallback_qimage.isNull():

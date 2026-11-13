@@ -402,6 +402,57 @@ class TestVramAndEarlySort(unittest.TestCase):
         review.unload_project()
         review.close()
 
+    def test_canvas_full_viewport_update_and_theme_background(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QGraphicsView
+        from loupe.ui.theme import apply_theme, THEMES
+        import loupe.ui.theme as theme_mod
+
+        review = ReviewView()
+        canvas = review.canvas
+        self.assertEqual(canvas.viewportUpdateMode(), QGraphicsView.FullViewportUpdate)
+        self.assertNotEqual(canvas.backgroundBrush().style(), Qt.NoBrush)
+        self.assertNotEqual(canvas.scene.backgroundBrush().style(), Qt.NoBrush)
+
+        original = theme_mod.current_theme_id
+        try:
+            apply_theme("light")
+            expected = THEMES["light"].colors["COLOR_BG_BASE"].lower()
+            self.assertEqual(canvas.backgroundBrush().color().name().lower(), expected)
+            self.assertEqual(canvas.scene.backgroundBrush().color().name().lower(), expected)
+        finally:
+            apply_theme(original)
+        review.close()
+
+    def test_vram_item_binds_int_gl_target(self):
+        from unittest.mock import MagicMock
+        from PySide6.QtGui import QPainter
+        from loupe.core.vram_cache import VRAMTextureEntry
+        import loupe.ui.review_view as rv
+
+        class _Target:
+            value = 3553
+
+        tex = MagicMock()
+        tex.isCreated.return_value = True
+        tex.target.return_value = _Target()
+        tex.textureId.return_value = 7
+        blitter = MagicMock()
+        blitter.isCreated.return_value = True
+        entry = VRAMTextureEntry(index=0, texture=tex, width=10, height=10, bytes_used=400)
+        item = rv.VRAMTextureGraphicsItem(entry, blitter_getter=lambda: blitter)
+
+        img = QImage(20, 20, QImage.Format_ARGB32)
+        painter = QPainter(img)
+        widget = MagicMock()
+        from PySide6.QtCore import QRect
+        widget.rect.return_value = QRect(0, 0, 20, 20)
+        with patch.object(rv.QOpenGLContext, "currentContext", return_value=object()):
+            item.paint(painter, None, widget)
+        painter.end()
+
+        blitter.bind.assert_called_once_with(3553)
+        self.assertIsInstance(blitter.bind.call_args[0][0], int)
 
 if __name__ == "__main__":
     unittest.main()
