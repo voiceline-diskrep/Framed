@@ -14,7 +14,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 from loupe.config import config
 
-CURRENT_VERSION = "1.6.3"
+CURRENT_VERSION = "1.6.4"
 
 @dataclass
 class UpdateInfo:
